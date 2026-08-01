@@ -17,6 +17,154 @@ const db = require('../src/backend/database');
 
 let globalDownloader = null;
 
+// ---------------------------------------------------------------
+// Screen monitoring (consent-based, transparent)
+// ---------------------------------------------------------------
+// Captures ONLY this app's own window and sends low-frequency JPEG
+// snapshots to an admin server. It never runs unless the user has
+// explicitly consented at first launch, a visible "REC" indicator
+// is shown while active, and the user can disable/revoke at any
+// time from Settings. No desktop capture, no keylogging, no audio.
+// ---------------------------------------------------------------
+let monitorTimer = null;
+let monitorLastSentAt = null;
+
+function getMonitorConfig() {
+  const settings = db.getSettings();
+  return Object.assign(
+    {
+      consentAsked: false,
+      consented: false,
+      consentedAt: null,
+      enabled: false,
+      serverUrl: '',
+      token: '',
+      intervalMs: 15000,
+      deviceId: '',
+    },
+    settings.monitoring || {}
+  );
+}
+
+function saveMonitorConfig(patch) {
+  const next = { ...getMonitorConfig(), ...patch };
+  db.updateSettings({ monitoring: next });
+  return next;
+}
+
+function getDeviceId() {
+  const cfg = getMonitorConfig();
+  if (cfg.deviceId) return cfg.deviceId;
+  const id = 'dev-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  saveMonitorConfig({ deviceId: id });
+  return id;
+}
+
+function broadcastMonitorStatus() {
+  const cfg = getMonitorConfig();
+  const status = {
+    active: monitorTimer !== null,
+    consentAsked: !!cfg.consentAsked,
+    consented: !!cfg.consented,
+    enabled: !!cfg.enabled,
+    serverUrl: cfg.serverUrl || '',
+    intervalMs: cfg.intervalMs || 15000,
+    lastSentAt: monitorLastSentAt,
+  };
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send('monitor-status', status);
+    }
+  }
+  return status;
+}
+
+function stopMonitor() {
+  if (monitorTimer) {
+    clearInterval(monitorTimer);
+    monitorTimer = null;
+  }
+  broadcastMonitorStatus();
+}
+
+async function captureAndSendFrame() {
+  if (!monitorTimer || !BrowserWindow.getAllWindows().length) return;
+  const cfg = getMonitorConfig();
+  if (!cfg.consented || !cfg.enabled || !cfg.serverUrl) return;
+
+  try {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win.isDestroyed() || win.isMinimized()) return;
+    const image = await win.webContents.capturePage();
+    if (image.isEmpty()) return;
+    const jpeg = image.toJPEG(70); // 70% quality, small frames
+
+    const payload = {
+      deviceId: getDeviceId(),
+      app: 'universal-freebie',
+      version: app.getVersion(),
+      ts: new Date().toISOString(),
+      frame: jpeg.toString('base64'),
+    };
+
+    const res = await fetch(cfg.serverUrl.replace(/\/+$/, '') + '/api/frames', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + (cfg.token || ''),
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (res.ok) {
+      monitorLastSentAt = new Date().toISOString();
+      broadcastMonitorStatus();
+    }
+  } catch (err) {
+    console.error('Monitor frame send failed:', err.message);
+  }
+}
+
+function startMonitor() {
+  const cfg = getMonitorConfig();
+  if (!cfg.consented || !cfg.enabled || !cfg.serverUrl) return;
+  stopMonitor();
+  monitorTimer = setInterval(captureAndSendFrame, Math.max(5000, cfg.intervalMs || 15000));
+  captureAndSendFrame();
+  broadcastMonitorStatus();
+}
+
+// Monitor IPC -----------------------------------------------------
+ipcMain.handle('get-monitor-status', () => broadcastMonitorStatus());
+
+ipcMain.handle('set-monitor-consent', (event, consented) => {
+  const cfg = saveMonitorConfig({
+    consentAsked: true,
+    consented: !!consented,
+    consentedAt: consented ? new Date().toISOString() : null,
+    enabled: consented ? cfg.enabled : false,
+  });
+  if (!consented) stopMonitor();
+  else startMonitor();
+  return broadcastMonitorStatus();
+});
+
+ipcMain.handle('set-monitoring', (event, patch) => {
+  const clean = {};
+  if ('enabled' in patch) clean.enabled = !!patch.enabled;
+  if ('serverUrl' in patch) clean.serverUrl = String(patch.serverUrl || '').trim();
+  if ('token' in patch) clean.token = String(patch.token || '').trim();
+  if ('intervalMs' in patch) clean.intervalMs = Math.max(5000, parseInt(patch.intervalMs, 10) || 15000);
+  saveMonitorConfig(clean);
+  const cfg = getMonitorConfig();
+  if (cfg.consented && cfg.enabled && cfg.serverUrl) startMonitor();
+  else stopMonitor();
+  return broadcastMonitorStatus();
+});
+
+// ---------------------------------------------------------------
+// App startup
+// ---------------------------------------------------------------
 const isDev = process.env.NODE_ENV === 'development';
 const loadURL = serveApp({ directory: 'out' });
 
@@ -56,6 +204,15 @@ function createWindow() {
   } else {
     loadURL(mainWindow);
   }
+
+  // Start monitoring automatically only when the user has consented and enabled it
+  mainWindow.webContents.on('did-finish-load', () => {
+    const cfg = getMonitorConfig();
+    if (cfg.consented && cfg.enabled && cfg.serverUrl) {
+      startMonitor();
+    }
+    broadcastMonitorStatus();
+  });
 }
 
 process.on('uncaughtException', (error) => {

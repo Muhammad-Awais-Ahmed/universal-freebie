@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monitor Admin — Universal Freebie</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 28px; border-bottom: 1px solid rgba(255,255,255,0.08);
+    background: rgba(2,6,23,0.6); position: sticky; top: 0; z-index: 10;
+    backdrop-filter: blur(10px);
+  }
+  header h1 {
+    font-size: 20px; font-weight: 800;
+    background: linear-gradient(135deg, #f97316, #eab308);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  header .sub { color: #64748b; font-size: 12px; margin-top: 2px; }
+  .btn {
+    background: rgba(59,130,246,0.2); color: #fff; border: 1px solid #3b82f6;
+    padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600;
+    transition: background 0.2s;
+  }
+  .btn:hover { background: rgba(59,130,246,0.4); }
+  .container { max-width: 1400px; margin: 0 auto; padding: 24px 28px; }
+  .stats { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+  .stat {
+    background: rgba(30,41,59,0.7); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px; padding: 16px 22px; min-width: 150px;
+  }
+  .stat .num { font-size: 26px; font-weight: 800; color: #fbbf24; }
+  .stat .lbl { font-size: 12px; color: #94a3b8; margin-top: 4px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+  .card {
+    background: rgba(30,41,59,0.7); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px; padding: 18px; cursor: pointer; transition: transform 0.2s, border-color 0.2s;
+  }
+  .card:hover { transform: translateY(-3px); border-color: rgba(249,115,22,0.5); }
+  .card .id { font-weight: 700; font-size: 15px; color: #f8fafc; word-break: break-all; }
+  .card .meta { font-size: 12px; color: #94a3b8; margin-top: 8px; line-height: 1.7; }
+  .card .count { font-size: 12px; color: #fbbf24; margin-top: 10px; font-weight: 600; }
+  .back { margin-bottom: 20px; }
+  .frames { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+  .frame {
+    background: rgba(15,23,42,0.8); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px; overflow: hidden;
+  }
+  .frame img { width: 100%; display: block; aspect-ratio: 16/10; object-fit: cover; background: #000; }
+  .frame .cap { padding: 8px 12px; font-size: 12px; color: #94a3b8; }
+  .empty { text-align: center; color: #64748b; padding: 60px 0; font-size: 14px; }
+  #view { display: none; }
+  #view.active { display: block; }
+  #list.active { display: block; }
+  #list { display: none; }
+  .auth-bar { display: flex; gap: 10px; align-items: center; }
+  .auth-bar input {
+    background: rgba(15,23,42,0.7); border: 1px solid rgba(255,255,255,0.12);
+    color: #e2e8f0; border-radius: 8px; padding: 8px 12px; font-size: 13px; outline: none; width: 220px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Monitor Admin</h1>
+    <div class="sub">Universal Freebie — consent-based screen monitoring viewer</div>
+  </div>
+  <div class="auth-bar">
+    <input id="tokenInput" type="password" placeholder="Admin token" />
+    <button class="btn" id="saveTokenBtn">Save</button>
+  </div>
+</header>
+
+<div class="container">
+  <div id="list" class="active">
+    <div class="stats">
+      <div class="stat"><div class="num" id="statDevices">0</div><div class="lbl">Devices</div></div>
+      <div class="stat"><div class="num" id="statFrames">0</div><div class="lbl">Total snapshots</div></div>
+      <div class="stat"><div class="num" id="statToday">0</div><div class="lbl">Active today</div></div>
+    </div>
+    <div class="grid" id="deviceGrid"></div>
+  </div>
+
+  <div id="view">
+    <button class="btn back" id="backBtn">← Back to devices</button>
+    <h2 style="margin-bottom:16px;font-size:18px;" id="viewTitle">Device</h2>
+    <div class="frames" id="frameGrid"></div>
+  </div>
+</div>
+
+<script>
+let token = localStorage.getItem('adminToken') || '';
+const tokenInput = document.getElementById('tokenInput');
+tokenInput.value = token;
+
+document.getElementById('saveTokenBtn').onclick = () => {
+  token = tokenInput.value.trim();
+  localStorage.setItem('adminToken', token);
+  loadDevices();
+};
+
+async function api(path) {
+  const res = await fetch(path, { headers: { Authorization: 'Bearer ' + token } });
+  if (res.status === 401) {
+    throw new Error('unauthorized');
+  }
+  if (!res.ok) throw new Error('request failed');
+  return res.json();
+}
+
+function fmt(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  return isNaN(d) ? ts : d.toLocaleString();
+}
+
+async function loadDevices() {
+  try {
+    const users = await api('/api/users');
+    const today = new Date().toISOString().slice(0, 10);
+    let totalFrames = 0, activeToday = 0;
+    users.forEach(u => {
+      totalFrames += u.frameCount || 0;
+      if ((u.lastSeen || '').startsWith(today)) activeToday++;
+    });
+    document.getElementById('statDevices').textContent = users.length;
+    document.getElementById('statFrames').textContent = totalFrames;
+    document.getElementById('statToday').textContent = activeToday;
+
+    const grid = document.getElementById('deviceGrid');
+    grid.innerHTML = '';
+    if (!users.length) {
+      grid.innerHTML = '<div class="empty">No devices have sent snapshots yet.</div>';
+      return;
+    }
+    users.forEach(u => {
+      const el = document.createElement('div');
+      el.className = 'card';
+      el.innerHTML = `
+        <div class="id">${u.id}</div>
+        <div class="meta">
+          App: ${u.app || 'unknown'} v${u.version || '?'}<br>
+          First seen: ${fmt(u.firstSeen)}<br>
+          Last seen: ${fmt(u.lastSeen)}
+        </div>
+        <div class="count">📸 ${u.frameCount} snapshots</div>`;
+      el.onclick = () => openDevice(u.id);
+      grid.appendChild(el);
+    });
+  } catch (err) {
+    if (err.message === 'unauthorized') {
+      alert('Enter the correct admin token and click Save.');
+    } else {
+      console.error(err);
+      alert('Failed to load devices: ' + err.message);
+    }
+  }
+}
+
+async function openDevice(id) {
+  document.getElementById('list').classList.remove('active');
+  document.getElementById('view').classList.add('active');
+  document.getElementById('viewTitle').textContent = 'Device: ' + id;
+  const grid = document.getElementById('frameGrid');
+  grid.innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const frames = await api('/api/frames/' + encodeURIComponent(id));
+    grid.innerHTML = '';
+    if (!frames.length) {
+      grid.innerHTML = '<div class="empty">No snapshots for this device.</div>';
+      return;
+    }
+    frames.forEach(f => {
+      const el = document.createElement('div');
+      el.className = 'frame';
+      el.innerHTML = `
+        <img src="/api/frame/${encodeURIComponent(id)}/${encodeURIComponent(f.file)}?t=${Date.now()}" loading="lazy" />
+        <div class="cap">${fmt(f.ts)}</div>`;
+      grid.appendChild(el);
+    });
+  } catch (err) {
+    grid.innerHTML = '<div class="empty">Error: ' + err.message + '</div>';
+  }
+}
+
+document.getElementById('backBtn').onclick = () => {
+  document.getElementById('view').classList.remove('active');
+  document.getElementById('list').classList.add('active');
+  loadDevices();
+};
+
+setInterval(() => { if (document.getElementById('list').classList.contains('active')) loadDevices(); }, 15000);
+loadDevices();
+</script>
+</body>
+</html>

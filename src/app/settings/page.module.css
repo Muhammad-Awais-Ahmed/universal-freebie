@@ -164,3 +164,74 @@
   opacity: 0.7;
   cursor: not-allowed;
 }
+
+/* Monitoring section */
+.monitorStatusRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.monitorStatusBadge {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.monitorStatusBadge.monitorActive {
+  background: rgba(239, 68, 68, 0.9);
+  border-color: #ef4444;
+  color: #fff;
+  animation: monitorPulse 2s ease-in-out infinite;
+}
+
+.monitorConsent {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.monitorActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.dangerBtn {
+  color: #fff;
+  cursor: pointer;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid #ef4444;
+  border-radius: 8px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.dangerBtn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.4);
+}
+
+.dangerBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.monitorNote {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 14px 0 0;
+}
+
+@keyframes monitorPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}

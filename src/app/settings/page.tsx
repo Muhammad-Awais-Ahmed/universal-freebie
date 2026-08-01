@@ -3,12 +3,29 @@
 import { useState, useEffect } from "react";
 import styles from "./page.module.css";
 
+interface MonitorStatus {
+  active: boolean;
+  consentAsked: boolean;
+  consented: boolean;
+  enabled: boolean;
+  serverUrl: string;
+  intervalMs: number;
+  lastSentAt: string | null;
+}
+
 export default function SettingsPage() {
   const [downloadDir, setDownloadDir] = useState("...");
   const [maxConcurrent, setMaxConcurrent] = useState(3);
   const [maxChunks, setMaxChunks] = useState(32);
   const [webtorrentTrackers, setWebtorrentTrackers] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Monitoring state
+  const [monitor, setMonitor] = useState<MonitorStatus | null>(null);
+  const [monServerUrl, setMonServerUrl] = useState("");
+  const [monToken, setMonToken] = useState("");
+  const [monInterval, setMonInterval] = useState(15);
+  const [monSaving, setMonSaving] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -17,12 +34,20 @@ export default function SettingsPage() {
   const loadSettings = async () => {
     try {
       const { ipcRenderer } = (window as any).require("electron");
-      const settings = await ipcRenderer.invoke("get-settings");
+      const [settings, m] = await Promise.all([
+        ipcRenderer.invoke("get-settings"),
+        ipcRenderer.invoke("get-monitor-status"),
+      ]);
       if (settings) {
         setDownloadDir(settings.downloadDirectory || "...");
         setMaxConcurrent(settings.maxConcurrent || 3);
         setMaxChunks(settings.maxChunks || 32);
         setWebtorrentTrackers(settings.webtorrentTrackers || "");
+      }
+      if (m) {
+        setMonitor(m);
+        setMonServerUrl(m.serverUrl || "");
+        setMonInterval(Math.round((m.intervalMs || 15000) / 1000));
       }
     } catch (err) {
       console.error("Failed to load settings:", err);
@@ -55,6 +80,56 @@ export default function SettingsPage() {
       }
     } catch (err) {
       console.error("Failed to choose folder:", err);
+    }
+  };
+
+  const saveMonitoring = async (enabled?: boolean) => {
+    setMonSaving(true);
+    try {
+      const { ipcRenderer } = (window as any).require("electron");
+      const m = await ipcRenderer.invoke("set-monitoring", {
+        serverUrl: monServerUrl,
+        token: monToken,
+        intervalMs: monInterval * 1000,
+        enabled: enabled !== undefined ? enabled : monitor?.enabled,
+      });
+      setMonitor(m);
+    } catch (err) {
+      console.error("Failed to save monitoring settings:", err);
+    } finally {
+      setMonSaving(false);
+    }
+  };
+
+  const revokeConsent = async () => {
+    setMonSaving(true);
+    try {
+      const { ipcRenderer } = (window as any).require("electron");
+      const m = await ipcRenderer.invoke("set-monitor-consent", false);
+      setMonitor(m);
+    } catch (err) {
+      console.error("Failed to revoke consent:", err);
+    } finally {
+      setMonSaving(false);
+    }
+  };
+
+  const grantConsent = async () => {
+    setMonSaving(true);
+    try {
+      const { ipcRenderer } = (window as any).require("electron");
+      await ipcRenderer.invoke("set-monitoring", {
+        serverUrl: monServerUrl,
+        token: monToken,
+        intervalMs: monInterval * 1000,
+        enabled: true,
+      });
+      const m = await ipcRenderer.invoke("set-monitor-consent", true);
+      setMonitor(m);
+    } catch (err) {
+      console.error("Failed to grant consent:", err);
+    } finally {
+      setMonSaving(false);
     }
   };
 
@@ -127,6 +202,127 @@ export default function SettingsPage() {
               placeholder="udp://tracker.opentrackr.org:1337/announce&#10;udp://open.stealth.si:80/announce"
             />
           </div>
+        </div>
+
+        <div className={styles.section}>
+          <h2 className={styles.sectionTitle}>📊 Monitoring Settings</h2>
+          <div className={styles.field}>
+            <label className={styles.label}>Monitoring Server URL</label>
+            <div className={styles.inputRow}>
+              <input
+                type="text"
+                className={styles.input}
+                value={monServerUrl}
+                readOnly
+              />
+              <button className={styles.browseBtn} onClick={chooseFolder}>
+                Browse
+              </button>
+            </div>
+          </div>
+          <div className={styles.field}>
+            <label className={styles.label}>Monitoring Interval (seconds)</label>
+            <input
+              type="range"
+              min="5"
+              max="30"
+              value={monInterval}
+              onChange={(e) => setMonInterval(parseInt(e.target.value))}
+              className={styles.slider}
+            />
+          </div>
+        </div>
+
+        <div className={styles.section}>
+          <h2 className={styles.sectionTitle}>🛡️ Monitoring &amp; Privacy</h2>
+
+          <div className={styles.monitorStatusRow}>
+            <span className={`${styles.monitorStatusBadge} ${monitor?.active ? styles.monitorActive : ""}`}>
+              {monitor?.active ? "● REC — Monitoring Active" : "○ Monitoring Off"}
+            </span>
+            <span className={styles.monitorConsent}>
+              {monitor?.consented ? "Consent granted" : monitor?.consentAsked ? "Consent declined" : "Consent not asked yet"}
+            </span>
+          </div>
+
+          <div className={styles.field}>
+            <label className={styles.label}>Admin server URL (where snapshots are sent)</label>
+            <input
+              type="text"
+              className={styles.input}
+              value={monServerUrl}
+              onChange={(e) => setMonServerUrl(e.target.value)}
+              placeholder="https://your-server.example.com"
+            />
+          </div>
+          <div className={styles.field}>
+            <label className={styles.label}>Access token</label>
+            <input
+              type="password"
+              className={styles.input}
+              value={monToken}
+              onChange={(e) => setMonToken(e.target.value)}
+              placeholder="Bearer token for the admin server"
+            />
+          </div>
+          <div className={styles.field}>
+            <label className={styles.label}>
+              Snapshot interval: {monInterval} seconds
+            </label>
+            <input
+              type="range"
+              min="5"
+              max="120"
+              step="5"
+              value={monInterval}
+              onChange={(e) => setMonInterval(parseInt(e.target.value))}
+              className={styles.slider}
+            />
+          </div>
+
+          <div className={styles.monitorActions}>
+            {monitor?.consented ? (
+              <>
+                <button
+                  className={styles.browseBtn}
+                  onClick={() => saveMonitoring(!monitor.enabled)}
+                  disabled={monSaving}
+                >
+                  {monitor.enabled ? "Disable Monitoring" : "Enable Monitoring"}
+                </button>
+                <button
+                  className={styles.dangerBtn}
+                  onClick={revokeConsent}
+                  disabled={monSaving}
+                >
+                  Revoke Consent
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  className={styles.browseBtn}
+                  onClick={grantConsent}
+                  disabled={monSaving}
+                >
+                  Grant Consent &amp; Enable
+                </button>
+                <button
+                  className={styles.browseBtn}
+                  onClick={() => saveMonitoring(false)}
+                  disabled={monSaving}
+                >
+                  Save Settings
+                </button>
+              </>
+            )}
+          </div>
+
+          <p className={styles.monitorNote}>
+            Only this app&apos;s window is captured — never your desktop, keyboard,
+            mic, or camera. A visible REC badge is shown while active. You can
+            revoke consent anytime.
+          </p>
         </div>
 
         <button

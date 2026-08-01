@@ -6,6 +6,9 @@ const nextConfig = {
   },
   // Ensure all routes are statically exported
   trailingSlash: true,
+  turbopack: {
+    root: import.meta.dirname,
+  },
 };
 
 export default nextConfig;

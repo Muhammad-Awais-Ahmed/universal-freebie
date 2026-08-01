@@ -1,0 +1,13 @@
+{
+  "name": "monitor-admin",
+  "version": "1.0.0",
+  "description": "Admin viewer for Universal Freebie consent-based screen monitoring",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

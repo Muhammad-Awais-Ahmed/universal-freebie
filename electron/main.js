@@ -304,6 +304,126 @@ async function handleApunKaGamesDownload(gameUrl, gameData) {
  *   -> download2 page (show window if captcha; auto-submit once solved + countdown done)
  *   -> final /d/ link (intercepted via will-download -> downloader)
  */
+
+// Self-contained auto-clicker injected into the TFL window on every page load.
+// sessionStorage keeps cross-navigation state; short-lived window guards make
+// each step retry-safe: if TFL interrupts with an ad navigation before a step's
+// submit fires, the flag is still unset and the step restarts on the next page.
+// IMPORTANT: keep this free of backticks and ${} - it is embedded via template
+// literals in both the dom-ready and did-finish-load handlers below.
+const tflAutoClickScript = `
+  if (window.ugcTflInterval) clearInterval(window.ugcTflInterval);
+  window.ugcTflInterval = setInterval(() => {
+    try {
+      const statusEl = document.getElementById('ugc-tfl-status');
+      const subEl = document.getElementById('ugc-tfl-sub');
+      const setStatus = (msg) => { if (statusEl) statusEl.innerText = msg; };
+      if (subEl) subEl.innerText = location.href;
+
+      const dl1Done = sessionStorage.getItem('ugcTflDl1') === '1';
+      const dl2Done = sessionStorage.getItem('ugcTflDl2') === '1';
+
+      const opInput = document.querySelector('input[name="op"]');
+      const opValue = opInput ? opInput.value : '';
+      const isDlForm = /^download/i.test(opValue);
+
+      // ---- Step 1: file page -> submit op=download1 ----
+      // The flag is set ONLY when the submit actually fires. If TFL navigates
+      // away before that (ad interstitial), the flag stays unset and this step
+      // retries on the next page load.
+      if (isDlForm && opValue === 'download1') {
+        if (!window.ugcSubmitting) {
+          window.ugcSubmitting = true;
+          setStatus('Bypassing TheFilesLocker ads...');
+          setTimeout(() => {
+            try {
+              sessionStorage.setItem('ugcTflDl1', '1');
+              const form = opInput.closest('form');
+              if (form) form.submit();
+              else opInput.click();
+            } catch (e) { /* page may have navigated */ }
+            setTimeout(() => { window.ugcSubmitting = false; }, 4000);
+          }, 300);
+        }
+        return;
+      }
+
+      // ---- Step 2: download2 page (countdown + captcha + create button) ----
+      if (isDlForm && opValue !== 'download1') {
+        const hasCaptcha = document.querySelector('.g-recaptcha, iframe[src*="recaptcha"]');
+        if (hasCaptcha) {
+          document.title = 'SHOW_ME';
+          setStatus('Please solve the captcha to continue');
+          if (window.ugcShieldCaptcha) window.ugcShieldCaptcha();
+        }
+
+        const btn = document.getElementById('downloadbtn')
+          || document.querySelector('.download-btn')
+          || document.querySelector('input[value*="Create"], input[value*="Download"], button[id*="download"], button[class*="download"]')
+          || (opInput && opInput.closest('form')
+              ? opInput.closest('form').querySelector('input[type="submit"], button[type="submit"]')
+              : null);
+
+        // The countdown element shows text like "Wait 10" - extract digits only.
+        const cdEl = document.querySelector('#countdown, .countdown, [id*="countdown"], [class*="countdown"], [id*="timer"], [class*="timer"]');
+        const cdVal = cdEl ? parseInt((cdEl.innerText || '').replace(/[^0-9]/g, ''), 10) : NaN;
+        const bodyMatch = document.body ? document.body.innerText.match(/(\\d+)\\s*(seconds|secs)/i) : null;
+
+        if (!btn || btn.disabled || btn.style.display === 'none') {
+          if (!isNaN(cdVal) && cdVal > 0) setStatus('Please wait ' + cdVal + 's...');
+          else if (bodyMatch) setStatus('Please wait ' + bodyMatch[1] + 's...');
+          else setStatus('Waiting for the download button...');
+          return;
+        }
+        if (!isNaN(cdVal) && cdVal > 0) {
+          setStatus('Please wait ' + cdVal + 's...');
+          return;
+        }
+
+        // Only submit once the button is enabled AND the captcha is solved (or not required).
+        const captchaOk = !hasCaptcha || (window.grecaptcha && window.grecaptcha.getResponse && window.grecaptcha.getResponse().length > 0);
+        if (!captchaOk) return;
+
+        if (!window.ugcCreateAt) {
+          window.ugcCreateAt = Date.now();
+          setStatus('Finalizing download link...');
+          return;
+        }
+        if (Date.now() - window.ugcCreateAt < 5000) return;
+
+        if (!window.ugcCreating) {
+          window.ugcCreating = true;
+          setStatus('Creating download link...');
+          setTimeout(() => {
+            try {
+              sessionStorage.setItem('ugcTflDl2', '1');
+              const form = btn.closest('form');
+              if (form) form.submit();
+              else btn.click();
+            } catch (e) { /* page may have navigated */ }
+            document.title = 'HIDE_ME';
+            setTimeout(() => { window.ugcCreating = false; }, 5000);
+          }, 500);
+        }
+        return;
+      }
+
+      // ---- Final direct link: only on pages with no op form left ----
+      // (gated on dl1Done so ad links on the create page can't hijack the flow)
+      if (!isDlForm && dl1Done && !window.ugcFinalClicked) {
+        const finalLink = document.querySelector('a#download_link, a.btn-primary[href*="/d/"], a.btn-download, a[href*="/d/"], a[href*="/file/"]');
+        if (finalLink && finalLink.href) {
+          window.ugcFinalClicked = true;
+          setStatus('Intercepting secure download link...');
+          setTimeout(() => { window.location.href = finalLink.href; }, 600);
+        }
+      }
+    } catch (e) {
+      console.error('TFL auto-clicker error:', e);
+    }
+  }, 800);
+`;
+
 function downloadTflPart(part, gameData, partIndex, totalParts) {
   return new Promise((resolve) => {
     const tflWindow = new BrowserWindow({
@@ -402,113 +522,18 @@ function downloadTflPart(part, gameData, partIndex, totalParts) {
             } catch (e) { /* ignore */ }
           };
         })();
+
+        // Register the auto-clicker here too: dom-ready fires before
+        // did-finish-load, and executeJavaScript can be dropped silently if a
+        // navigation races it. The window.ugcTflInterval guard keeps exactly
+        // one interval per page even if both handlers land on the same load.
+        ${tflAutoClickScript}
       `).catch(() => {});
     });
 
     tflWindow.webContents.on('did-finish-load', () => {
       tflWindow.webContents.executeJavaScript(`
-        setInterval(() => {
-          try {
-            const statusEl = document.getElementById('ugc-tfl-status');
-            const setStatus = (msg) => { if (statusEl) statusEl.innerText = msg; };
-
-            // State survives page navigations via sessionStorage (same-origin).
-            const dl1Done = sessionStorage.getItem('ugcTflDl1') === '1';
-            const dl2Done = sessionStorage.getItem('ugcTflDl2') === '1';
-
-            const opInput = document.querySelector('input[name="op"]');
-            const opValue = opInput ? opInput.value : '';
-            const isDlForm = /^download/i.test(opValue);
-
-            // ---- Step 1: file page -> submit op=download1 (hidden) ----
-            if (isDlForm && opValue === 'download1' && !dl1Done) {
-              sessionStorage.setItem('ugcTflDl1', '1');
-              setStatus('Bypassing TheFilesLocker ads...');
-              setTimeout(() => {
-                const form = opInput.closest('form');
-                if (form) form.submit();
-                else opInput.click();
-              }, 800);
-              return;
-            }
-
-            // ---- Step 2: download2 page (countdown + captcha + create button) ----
-            if (isDlForm && opValue !== 'download1' && !dl2Done) {
-              const hasCaptcha = document.querySelector('.g-recaptcha, iframe[src*="recaptcha"]');
-              if (hasCaptcha) {
-                document.title = 'SHOW_ME';
-                setStatus('Please solve the captcha to continue');
-                if (window.ugcShieldCaptcha) window.ugcShieldCaptcha();
-              }
-
-              const btn = document.getElementById('downloadbtn')
-                || document.querySelector('.download-btn')
-                || document.querySelector('input[value*="Create"], input[value*="Download"], button[id*="download"], button[class*="download"]')
-                || (opInput && opInput.closest('form')
-                    ? opInput.closest('form').querySelector('input[type="submit"], button[type="submit"]')
-                    : null);
-              if (!btn || btn.disabled || btn.style.display === 'none') {
-                // Surface the 15s countdown while the button is locked
-                const cdEl = document.querySelector('#countdown, .countdown, [id*="countdown"], [class*="countdown"], [id*="timer"], [class*="timer"]');
-                const cdVal = cdEl ? parseInt(cdEl.innerText, 10) : NaN;
-                const bodyMatch = document.body ? document.body.innerText.match(/(\\d+)\\s*(seconds|secs)/i) : null;
-                if (!isNaN(cdVal) && cdVal > 0) setStatus('Please wait ' + cdVal + 's...');
-                else if (bodyMatch) setStatus('Please wait ' + bodyMatch[1] + 's...');
-                else setStatus('Waiting for the download button...');
-                return;
-              }
-
-              // Do not click while a visible countdown timer is still running
-              const cdEl = document.querySelector('#countdown, .countdown, [id*="countdown"], [class*="countdown"], [id*="timer"], [class*="timer"]');
-              const cdVal = cdEl ? parseInt(cdEl.innerText, 10) : NaN;
-              if (!isNaN(cdVal) && cdVal > 0) {
-                setStatus('Please wait ' + cdVal + 's...');
-                return;
-              }
-
-              // Only submit once the button is enabled AND the captcha is solved (or not required).
-              const captchaOk = !hasCaptcha || (window.grecaptcha && window.grecaptcha.getResponse && window.grecaptcha.getResponse().length > 0);
-              if (!captchaOk) return;
-
-              if (!window.ugcCreateAt) {
-                window.ugcCreateAt = Date.now();
-                setStatus('Finalizing download link...');
-                return;
-              }
-              if (Date.now() - window.ugcCreateAt < 5000) return;
-
-              if (!window.ugcCreating) {
-                window.ugcCreating = true;
-                setStatus('Creating download link...');
-                setTimeout(() => {
-                  sessionStorage.setItem('ugcTflDl2', '1');
-                  const form = btn.closest('form');
-                  if (form) form.submit();
-                  else btn.click();
-                  document.title = 'HIDE_ME';
-                  setTimeout(() => { window.ugcCreating = false; }, 5000);
-                }, 500);
-              }
-              return;
-            }
-
-            // ---- Final direct link: ONLY looked for after download2 was submitted ----
-            // dl2Done persists across navigations, so the /d/ link is found on
-            // whatever page TFL lands on after creating the link.
-            // Also handles hosts that skip the download2 form entirely and go
-            // straight to the final page (no op form present after dl1 submit).
-            if ((dl2Done || (dl1Done && !isDlForm)) && !window.ugcFinalClicked) {
-              const finalLink = document.querySelector('a#download_link, a.btn-primary[href*="/d/"], a.btn-download, a[href*="/d/"], a[href*="/file/"]');
-              if (finalLink && finalLink.href) {
-                window.ugcFinalClicked = true;
-                setStatus('Intercepting secure download link...');
-                setTimeout(() => { window.location.href = finalLink.href; }, 600);
-              }
-            }
-          } catch (e) {
-            console.error('TFL auto-clicker error:', e);
-          }
-        }, 800);
+        ${tflAutoClickScript}
       `).catch(() => {});
     });
 

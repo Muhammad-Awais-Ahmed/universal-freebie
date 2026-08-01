@@ -1,0 +1,50 @@
+# ---------------------------------------------------------------
+# Universal Freebie - production copy .gitignore
+# Only files essential for the build are committed.
+# ---------------------------------------------------------------
+
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# electron-builder output (installers / unpacked builds)
+dist/
+release/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Env / secrets (never commit)
+.env
+.env.*
+!.env.example
+
+# Downloads / user data (runtime generated)
+downloads/
+
+# TypeScript incremental cache
+*.tsbuildinfo
+
+# Electron crash dumps / temp
+*.dmp

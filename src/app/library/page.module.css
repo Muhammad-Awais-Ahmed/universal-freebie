@@ -1,0 +1,194 @@
+.container {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 40px;
+  min-height: calc(100vh - 60px);
+}
+
+.header {
+  margin-bottom: 30px;
+}
+
+.title {
+  background: linear-gradient(135deg, #f97316 0%, #eab308 100%);
+  -webkit-text-fill-color: transparent;
+  -webkit-background-clip: text;
+  margin: 0 0 10px;
+  font-size: 42px;
+  font-weight: 800;
+}
+
+.subtitle {
+  color: #94a3b8;
+  margin: 0 0 30px;
+  font-size: 18px;
+}
+
+.tabs {
+  gap: 8px;
+  margin-bottom: 24px;
+  display: flex;
+}
+
+.tab {
+  cursor: pointer;
+  color: #94a3b8;
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.tab:hover {
+  color: #e2e8f0;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.activeTab {
+  color: #fff;
+  background: linear-gradient(135deg, #f97316 0%, #eab308 100%);
+  border-color: transparent;
+}
+
+.activeTab:hover {
+  color: #fff;
+  border-color: transparent;
+}
+
+.content {
+  min-height: 300px;
+}
+
+.emptyState {
+  text-align: center;
+  padding: 60px 0;
+  color: #94a3b8;
+}
+
+.emptyIcon {
+  font-size: 64px;
+  margin-bottom: 16px;
+}
+
+.emptyState h3 {
+  color: #e2e8f0;
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+.emptyState p {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.dirPath {
+  color: #64748b;
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.openBtn {
+  color: #fff;
+  cursor: pointer;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border: none;
+  border-radius: 8px;
+  margin-top: 16px;
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.openBtn:hover {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  transform: translateY(-2px);
+}
+
+.list {
+  flex-direction: column;
+  gap: 12px;
+  display: flex;
+}
+
+.listItem {
+  cursor: pointer;
+  color: #e2e8f0;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  transition: all 0.2s;
+  display: flex;
+}
+
+.listItem:hover {
+  border-color: rgba(100, 255, 218, 0.3);
+  background: rgba(30, 41, 59, 0.9);
+}
+
+.listIcon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.listInfo {
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.listInfo h4 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.listInfo p {
+  color: #64748b;
+  margin: 0;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.listSize,
+.listDate {
+  color: #94a3b8;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.listActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.retryBtn {
+  color: #facc15;
+  cursor: pointer;
+  background: rgba(250, 204, 21, 0.1);
+  border: 1px solid rgba(250, 204, 21, 0.3);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.retryBtn:hover {
+  background: rgba(250, 204, 21, 0.2);
+  border-color: rgba(250, 204, 21, 0.5);
+}

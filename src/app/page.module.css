@@ -1,0 +1,95 @@
+.hero {
+  min-height: calc(100vh - 60px);
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  display: flex;
+}
+
+.content {
+  text-align: center;
+  max-width: 700px;
+}
+
+.title {
+  color: #e2e8f0;
+  margin: 0 0 20px;
+  font-size: 72px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.accent {
+  background: linear-gradient(135deg, #f97316 0%, #eab308 100%);
+  -webkit-text-fill-color: transparent;
+  -webkit-background-clip: text;
+}
+
+.subtitle {
+  color: #94a3b8;
+  margin: 0 0 40px;
+  font-size: 18px;
+  line-height: 1.6;
+}
+
+.actions {
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 60px;
+  display: flex;
+}
+
+.primaryBtn {
+  color: #fff;
+  background: linear-gradient(135deg, #f97316 0%, #eab308 100%);
+  border-radius: 12px;
+  padding: 14px 32px;
+  font-size: 16px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.2s;
+}
+
+.primaryBtn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px rgba(249, 115, 22, 0.3);
+}
+
+.secondaryBtn {
+  color: #e2e8f0;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 14px 32px;
+  font-size: 16px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.2s;
+}
+
+.secondaryBtn:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-2px);
+}
+
+.stats {
+  justify-content: center;
+  gap: 48px;
+  display: flex;
+}
+
+.statItem {
+  text-align: center;
+}
+
+.statNumber {
+  color: #e2e8f0;
+  margin-bottom: 4px;
+  font-size: 32px;
+  font-weight: 700;
+}
+
+.statLabel {
+  color: #94a3b8;
+  font-size: 14px;
+}

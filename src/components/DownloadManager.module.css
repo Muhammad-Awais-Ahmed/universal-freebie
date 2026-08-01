@@ -1,0 +1,202 @@
+.container {
+  backdrop-filter: blur(10px);
+  color: #fff;
+  z-index: 9999;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: none;
+  border-radius: 16px 16px 0 0;
+  width: 380px;
+  font-family: Inter, -apple-system, sans-serif;
+  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  position: fixed;
+  bottom: 0;
+  right: 20px;
+  transform: translateY(calc(100% - 50px));
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.container.visible {
+  transform: translateY(0);
+}
+
+.header {
+  cursor: pointer;
+  background: linear-gradient(rgba(255, 255, 255, 0.05) 0%, transparent 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 16px 16px 0 0;
+  justify-content: space-between;
+  align-items: center;
+  height: 50px;
+  padding: 0 20px;
+  display: flex;
+}
+
+.title {
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+}
+
+.icon {
+  font-size: 16px;
+}
+
+.toggleBtn {
+  color: #8892b0;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 4px;
+  font-size: 12px;
+  transition: color 0.2s;
+}
+
+.toggleBtn:hover {
+  color: #fff;
+}
+
+.list {
+  flex-direction: column;
+  gap: 16px;
+  max-height: 400px;
+  padding: 16px;
+  display: flex;
+  overflow-y: auto;
+}
+
+.list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+.empty {
+  text-align: center;
+  color: #8892b0;
+  padding: 20px 0;
+  font-size: 13px;
+}
+
+.downloadItem {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 12px;
+  transition: background 0.2s;
+}
+
+.downloadItem:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.itemHeader {
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  display: flex;
+}
+
+.itemName {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.itemStatus {
+  font-size: 11px;
+  color: #64ffda;
+}
+
+.progressContainer {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  height: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.progressBar {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+}
+
+.progressBar.completed {
+  background: linear-gradient(90deg, #22c55e, #4ade80);
+}
+
+.progressBar.error {
+  background: linear-gradient(90deg, #ef4444, #f87171);
+}
+
+.progressBar.queued {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.itemDetails {
+  justify-content: space-between;
+  align-items: center;
+  display: flex;
+}
+
+.sizeInfo {
+  color: #8892b0;
+  font-size: 11px;
+}
+
+.actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.cancelBtn {
+  color: #f87171;
+  cursor: pointer;
+  background: none;
+  border: none;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.cancelBtn:hover {
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.retryBtn {
+  color: #facc15;
+  cursor: pointer;
+  background: none;
+  border: none;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.retryBtn:hover {
+  background: rgba(250, 204, 21, 0.1);
+}

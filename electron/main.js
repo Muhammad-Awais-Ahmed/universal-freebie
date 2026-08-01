@@ -324,6 +324,9 @@ function downloadTflPart(part, gameData, partIndex, totalParts) {
       if (title === 'SHOW_ME') {
         tflWindow.show();
       }
+      if (title === 'HIDE_ME') {
+        tflWindow.hide();
+      }
     });
 
     tflWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -355,6 +358,49 @@ function downloadTflPart(part, gameData, partIndex, totalParts) {
           subText.style.cssText = 'color: #94a3b8; font-size: 14px;';
           overlay.appendChild(subText);
           document.body.appendChild(overlay);
+
+          const shieldCss = document.createElement('style');
+          shieldCss.textContent = '.g-recaptcha, iframe[src*="recaptcha"] { position: relative !important; z-index: 2147483641 !important; }';
+          document.head.appendChild(shieldCss);
+
+          // Keep the branded overlay ALWAYS visible. Never remove it: expose ONLY
+          // the captcha widget by punching a click-hole around it and blocking
+          // clicks on the raw website behind the overlay.
+          window.ugcShieldCaptcha = function() {
+            try {
+              const captchaEl = document.querySelector('iframe[src*="recaptcha/api2/bframe"]') ||
+                                document.querySelector('.g-recaptcha') ||
+                                document.querySelector('iframe[src*="recaptcha"]');
+              const overlayEl = document.getElementById('ugc-tfl-overlay') || document.getElementById('ugc-clean-overlay');
+              if (!captchaEl || (captchaEl.offsetWidth === 0 && captchaEl.offsetHeight === 0)) return;
+              if (overlayEl) overlayEl.style.pointerEvents = 'none';
+              const r = captchaEl.getBoundingClientRect();
+              const pad = 8;
+              const x1 = Math.max(0, r.left - pad);
+              const y1 = Math.max(0, r.top - pad);
+              const x2 = Math.min(window.innerWidth, r.right + pad);
+              const y2 = Math.min(window.innerHeight, r.bottom + pad);
+              const W = window.innerWidth, H = window.innerHeight;
+              let wrap = document.getElementById('ugc-shield-strips');
+              if (!wrap) {
+                wrap = document.createElement('div');
+                wrap.id = 'ugc-shield-strips';
+                wrap.style.cssText = 'position: fixed; inset: 0; z-index: 2147483640; pointer-events: none;';
+                document.body.appendChild(wrap);
+              }
+              wrap.innerHTML = '';
+              const mk = (top, left, w, h) => {
+                if (w <= 0 || h <= 0) return;
+                const d = document.createElement('div');
+                d.style.cssText = 'position: fixed; top:' + top + 'px; left:' + left + 'px; width:' + w + 'px; height:' + h + 'px; background: transparent; pointer-events: auto;';
+                wrap.appendChild(d);
+              };
+              mk(0, 0, W, y1);
+              mk(y2, 0, W, H - y2);
+              mk(y1, 0, x1, y2 - y1);
+              mk(y1, x2, W - x2, y2 - y1);
+            } catch (e) { /* ignore */ }
+          };
         })();
       `).catch(() => {});
     });
@@ -379,50 +425,55 @@ function downloadTflPart(part, gameData, partIndex, totalParts) {
               return;
             }
 
-            // ---- Final direct link after download2 submit ----
-            const finalLink = document.querySelector('a.btn-primary[href*="/d/"], a#download_link, a.btn-download, a[href*="/d/"]');
-            if (finalLink && finalLink.href && !window.ugcFinalClicked) {
-              window.ugcFinalClicked = true;
-              setStatus('Intercepting secure download link...');
-              setTimeout(() => { window.location.href = finalLink.href; }, 600);
-              return;
-            }
-
             // ---- Step 2: download2 page (captcha + create button) ----
             const dl2 = document.querySelector('input[name="op"][value="download2"]');
-            if (!dl2) return;
 
-            const hasCaptcha = document.querySelector('.g-recaptcha, iframe[src*="recaptcha"]');
-            if (hasCaptcha) {
-              document.title = 'SHOW_ME';
-              const overlay = document.getElementById('ugc-tfl-overlay');
-              if (overlay) overlay.remove();
-            }
+            if (dl2) {
+              const hasCaptcha = document.querySelector('.g-recaptcha, iframe[src*="recaptcha"]');
+              if (hasCaptcha) {
+                document.title = 'SHOW_ME';
+                setStatus('Please solve the captcha to continue');
+                if (window.ugcShieldCaptcha) window.ugcShieldCaptcha();
+              }
 
-            const btn = document.getElementById('downloadbtn') || document.querySelector('.download-btn') || document.querySelector('input[value*="Create"]');
-            if (!btn || btn.disabled || btn.style.display === 'none') return;
+              const btn = document.getElementById('downloadbtn') || document.querySelector('.download-btn') || document.querySelector('input[value*="Create"]');
+              if (!btn || btn.disabled || btn.style.display === 'none') return;
 
-            // The page disables the button during the 10s countdown; only submit once
-            // the button is enabled AND the captcha is solved (or not required).
-            const captchaOk = !hasCaptcha || (window.grecaptcha && window.grecaptcha.getResponse && window.grecaptcha.getResponse().length > 0);
-            if (!captchaOk) return;
+              // The page disables the button during the countdown; only submit once
+              // the button is enabled AND the captcha is solved (or not required).
+              const captchaOk = !hasCaptcha || (window.grecaptcha && window.grecaptcha.getResponse && window.grecaptcha.getResponse().length > 0);
+              if (!captchaOk) return;
 
-            if (!window.ugcCreateAt) {
-              window.ugcCreateAt = Date.now();
-              setStatus('Finalizing download link...');
+              if (!window.ugcCreateAt) {
+                window.ugcCreateAt = Date.now();
+                setStatus('Finalizing download link...');
+                return;
+              }
+              if (Date.now() - window.ugcCreateAt < 5000) return;
+
+              if (!window.ugcCreating) {
+                window.ugcCreating = true;
+                setStatus('Creating download link...');
+                setTimeout(() => {
+                  const form = btn.closest('form');
+                  if (form) form.submit();
+                  else btn.click();
+                  window.ugcSubmittedDl2 = true;
+                  document.title = 'HIDE_ME';
+                  setTimeout(() => { window.ugcCreating = false; }, 5000);
+                }, 500);
+              }
               return;
             }
-            if (Date.now() - window.ugcCreateAt < 5000) return;
 
-            if (!window.ugcCreating) {
-              window.ugcCreating = true;
-              setStatus('Creating download link...');
-              setTimeout(() => {
-                const form = btn.closest('form');
-                if (form) form.submit();
-                else btn.click();
-                setTimeout(() => { window.ugcCreating = false; }, 5000);
-              }, 500);
+            // ---- Final direct link: ONLY looked for after download2 was submitted ----
+            if (window.ugcSubmittedDl2 && !window.ugcFinalClicked) {
+              const finalLink = document.querySelector('a#download_link, a.btn-primary[href*="/d/"], a.btn-download, a[href*="/d/"]');
+              if (finalLink && finalLink.href) {
+                window.ugcFinalClicked = true;
+                setStatus('Intercepting secure download link...');
+                setTimeout(() => { window.location.href = finalLink.href; }, 600);
+              }
             }
           } catch (e) {
             console.error('TFL auto-clicker error:', e);
@@ -640,7 +691,49 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
               overlay.appendChild(subText);
 
               document.body.appendChild(overlay);
-              
+
+              const shieldCss = document.createElement('style');
+              shieldCss.textContent = '.g-recaptcha, iframe[src*="recaptcha"] { position: relative !important; z-index: 2147483641 !important; }';
+              document.head.appendChild(shieldCss);
+
+              // Keep the branded overlay ALWAYS visible; expose ONLY the captcha
+              // widget by punching a click-hole and blocking clicks on the site.
+              window.ugcShieldCaptcha = function() {
+                try {
+                  const captchaEl = document.querySelector('iframe[src*="recaptcha/api2/bframe"]') ||
+                                    document.querySelector('.g-recaptcha') ||
+                                    document.querySelector('iframe[src*="recaptcha"]');
+                  const overlayEl = document.getElementById('ugc-clean-overlay') || document.getElementById('ugc-tfl-overlay');
+                  if (!captchaEl || (captchaEl.offsetWidth === 0 && captchaEl.offsetHeight === 0)) return;
+                  if (overlayEl) overlayEl.style.pointerEvents = 'none';
+                  const r = captchaEl.getBoundingClientRect();
+                  const pad = 8;
+                  const x1 = Math.max(0, r.left - pad);
+                  const y1 = Math.max(0, r.top - pad);
+                  const x2 = Math.min(window.innerWidth, r.right + pad);
+                  const y2 = Math.min(window.innerHeight, r.bottom + pad);
+                  const W = window.innerWidth, H = window.innerHeight;
+                  let wrap = document.getElementById('ugc-shield-strips');
+                  if (!wrap) {
+                    wrap = document.createElement('div');
+                    wrap.id = 'ugc-shield-strips';
+                    wrap.style.cssText = 'position: fixed; inset: 0; z-index: 2147483640; pointer-events: none;';
+                    document.body.appendChild(wrap);
+                  }
+                  wrap.innerHTML = '';
+                  const mk = (top, left, w, h) => {
+                    if (w <= 0 || h <= 0) return;
+                    const d = document.createElement('div');
+                    d.style.cssText = 'position: fixed; top:' + top + 'px; left:' + left + 'px; width:' + w + 'px; height:' + h + 'px; background: transparent; pointer-events: auto;';
+                    wrap.appendChild(d);
+                  };
+                  mk(0, 0, W, y1);
+                  mk(y2, 0, W, H - y2);
+                  mk(y1, 0, x1, y2 - y1);
+                  mk(y1, x2, W - x2, y2 - y1);
+                } catch (e) { /* ignore */ }
+              };
+
               document.title = 'SHOW_ME';
             }
           })();
@@ -665,10 +758,14 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
 
               const dynamicCaptcha = document.querySelector('#cf-please-wait, #challenge-stage, iframe[src*="recaptcha"], iframe[src*="turnstile"], .g-recaptcha');
               if (dynamicCaptcha) {
-                document.title = 'SHOW_ME';
-                const oldOverlay = document.getElementById('ugc-clean-overlay');
-                if (oldOverlay) oldOverlay.remove();
-                return;
+                const captchaSolved = window.grecaptcha && window.grecaptcha.getResponse && window.grecaptcha.getResponse().length > 0;
+                if (!captchaSolved) {
+                  document.title = 'SHOW_ME';
+                  const timerEl = document.getElementById('ugc-custom-timer');
+                  if (timerEl) timerEl.innerText = 'Please complete the captcha to continue';
+                  if (window.ugcShieldCaptcha) window.ugcShieldCaptcha();
+                  return;
+                }
               }
 
               if (window.hasClicked) return;
@@ -721,8 +818,9 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
                 
                 const createBtn = document.getElementById('download') || document.querySelector('.download-btn') || document.querySelector('#downloadbtn, input[value*="Create"]');
                 const hasCaptcha = document.querySelector('.g-recaptcha, iframe[src*="recaptcha"]');
+                const captchaOk2 = !hasCaptcha || (window.grecaptcha && window.grecaptcha.getResponse && window.grecaptcha.getResponse().length > 0);
                 
-                if (createBtn && !createBtn.disabled && createBtn.style.display !== 'none' && !hasCaptcha) {
+                if (createBtn && !createBtn.disabled && createBtn.style.display !== 'none' && captchaOk2) {
                   setStatus('Generating final download link! Waiting 5s...');
                   window.hasClicked = true;
                   setTimeout(() => {
@@ -730,21 +828,26 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
                     const form = createBtn.closest('form');
                     if (form) form.submit();
                     else createBtn.click();
+                    window.ugcSgSubmitted = true;
                     setTimeout(() => { window.hasClicked = false; }, 4000);
                   }, 5000);
                   return;
                 }
                 
-                const finalLink = document.querySelector('a.btn-primary[href*="/d/"], a.download-link, a#download_link, a.btn-download, a[href*="/d/"]');
-                if (finalLink && !finalLink.disabled && finalLink.href) {
-                  setStatus('Intercepting raw game file! Waiting 5s...');
-                  window.hasClicked = true;
-                  setTimeout(() => {
-                    setStatus('Downloading...');
-                    window.location.href = finalLink.href;
-                    setTimeout(() => { window.hasClicked = false; }, 4000);
-                  }, 5000);
-                  return;
+                // Final direct link: only look for it AFTER "Create" was submitted,
+                // so ad links on the create page can't hijack the flow.
+                if (window.ugcSgSubmitted) {
+                  const finalLink = document.querySelector('a.btn-primary[href*="/d/"], a.download-link, a#download_link, a.btn-download, a[href*="/d/"]');
+                  if (finalLink && !finalLink.disabled && finalLink.href) {
+                    setStatus('Intercepting raw game file! Waiting 5s...');
+                    window.hasClicked = true;
+                    setTimeout(() => {
+                      setStatus('Downloading...');
+                      window.location.href = finalLink.href;
+                      setTimeout(() => { window.hasClicked = false; }, 4000);
+                    }, 5000);
+                    return;
+                  }
                 }
               }
             } catch (e) {

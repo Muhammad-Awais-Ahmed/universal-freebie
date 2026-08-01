@@ -71,6 +71,10 @@ class Downloader {
     };
     this.downloads.set(id, item);
 
+    // Persist immediately so every started download appears in the
+    // home-page Downloads section, even before it finishes.
+    db.addDownloadToHistory(item);
+
     // Concurrency check
     const settings = this._getSettings();
     if (this._getActiveDownloadCount() > settings.maxConcurrent) {
@@ -237,6 +241,11 @@ class Downloader {
         downloadItem.progress = 100;
         downloadItem.speed = 0;
         db.addDownloadToHistory(downloadItem);
+        db.updateDownloadHistory(downloadItem.id, {
+          status: 'completed',
+          downloadedBytes: downloadItem.downloadedBytes || downloadItem.totalBytes,
+          totalBytes: downloadItem.totalBytes
+        });
         this._emitProgress();
         this._processQueue();
         this._scheduleAutoRemove(id);
@@ -247,7 +256,12 @@ class Downloader {
         downloadItem.error = err.message;
         downloadItem.speed = 0;
         // Save partial progress so it can be resumed
-        db.updateDownloadHistoryStatus(id, 'error');
+        db.updateDownloadHistory(downloadItem.id, {
+          status: 'error',
+          downloadedBytes: downloadItem.downloadedBytes || 0,
+          totalBytes: downloadItem.totalBytes || 0,
+          error: err.message
+        });
         this._emitProgress();
         this._processQueue();
       }
@@ -312,6 +326,11 @@ class Downloader {
           downloadItem.progress = 100;
           downloadItem.speed = 0;
           db.addDownloadToHistory(downloadItem);
+          db.updateDownloadHistory(downloadItem.id, {
+            status: 'completed',
+            downloadedBytes: downloadItem.downloadedBytes || downloadItem.totalBytes,
+            totalBytes: downloadItem.totalBytes
+          });
           this._emitProgress();
           this._processQueue();
           this._scheduleAutoRemove(downloadItem.id);
@@ -323,7 +342,12 @@ class Downloader {
           downloadItem.status = 'error';
           downloadItem.error = err.message;
           downloadItem.speed = 0;
-          db.updateDownloadHistoryStatus(downloadItem.id, 'error');
+          db.updateDownloadHistory(downloadItem.id, {
+            status: 'error',
+            downloadedBytes: downloadItem.downloadedBytes || 0,
+            totalBytes: downloadItem.totalBytes || 0,
+            error: err.message
+          });
           this._emitProgress();
           this._processQueue();
         }
@@ -334,6 +358,12 @@ class Downloader {
           downloadItem.status = 'error';
           downloadItem.error = err.message;
           downloadItem.speed = 0;
+          db.updateDownloadHistory(downloadItem.id, {
+            status: 'error',
+            downloadedBytes: downloadItem.downloadedBytes || 0,
+            totalBytes: downloadItem.totalBytes || 0,
+            error: err.message
+          });
           this._emitProgress();
           this._processQueue();
         }
@@ -342,7 +372,12 @@ class Downloader {
       downloadItem.status = 'error';
       downloadItem.error = err.message;
       downloadItem.speed = 0;
-      db.updateDownloadHistoryStatus(downloadItem.id, 'error');
+      db.updateDownloadHistory(downloadItem.id, {
+        status: 'error',
+        downloadedBytes: downloadItem.downloadedBytes || 0,
+        totalBytes: downloadItem.totalBytes || 0,
+        error: err.message
+      });
       this._emitProgress();
       this._processQueue();
     }
@@ -393,6 +428,8 @@ class Downloader {
     
     this.downloads.set(id, downloadItem);
 
+    db.addDownloadToHistory(downloadItem);
+
     if (!this.torrentClient) {
       downloadItem.status = 'error';
       downloadItem.error = 'WebTorrent failed to initialize';
@@ -430,6 +467,11 @@ class Downloader {
         downloadItem.progress = 100;
         downloadItem.speed = 0;
         db.addDownloadToHistory(downloadItem);
+        db.updateDownloadHistory(downloadItem.id, {
+          status: 'completed',
+          downloadedBytes: downloadItem.totalBytes,
+          totalBytes: downloadItem.totalBytes
+        });
         this._emitProgress();
         this._processQueue();
         this._scheduleAutoRemove(id);
@@ -452,13 +494,20 @@ class Downloader {
     if (!item) return;
 
     item.status = 'cancelled';
-    
+
+    // Keep the partial file in history so the user can Continue it later.
+    db.updateDownloadHistory(id, {
+      status: 'interrupted',
+      downloadedBytes: item.downloadedBytes || 0,
+      totalBytes: item.totalBytes || 0
+    });
+
     if (item.type === 'torrent' && item.torrentInfo) {
       item.torrentInfo.destroy();
     } else if (item.type === 'electron' && item.electronItem) {
       item.electronItem.cancel();
     }
-    
+
     this._emitProgress();
     this._processQueue();
   }
@@ -472,6 +521,7 @@ class Downloader {
       item.status = 'downloading';
       item.speed = 0;
       item.error = undefined;
+      db.updateDownloadHistory(id, { status: 'downloading' });
       this._emitProgress();
       this._performHttpDownload(item.id, item.url, item.filePath, resumeFrom);
       return;
@@ -479,9 +529,51 @@ class Downloader {
 
     if (item.status === 'queued') {
       item.status = 'downloading';
+      db.updateDownloadHistory(id, { status: 'downloading' });
       this._emitProgress();
       this._performHttpDownload(item.id, item._resumeUrl || item.url, item.filePath, item._resumeFrom || 0);
     }
+  }
+
+  /**
+   * Continues a download that was persisted to history (e.g. after app restart).
+   * Re-creates the in-memory item from the history entry and resumes from the
+   * last saved byte offset.
+   */
+  resumeFromHistory(id) {
+    const history = db.getDownloadHistory().find(d => d.id === id);
+    if (!history) return { error: 'Download not found in history.' };
+    if (!history.url) return { error: 'No download URL available for this item.' };
+
+    // Already in memory → just resume it.
+    if (this.downloads.has(id)) {
+      this.resumeDownload(id);
+      return { success: true };
+    }
+
+    if (history.status === 'completed') return { error: 'Download is already complete.' };
+
+    const filePath = path.join(this.downloadsDir, history.filename);
+    const resumeFrom = history.downloadedBytes || 0;
+
+    const item = {
+      id,
+      url: history.url,
+      filename: history.filename,
+      filePath,
+      meta: { source: history.source || 'Unknown' },
+      status: 'downloading',
+      progress: history.totalBytes ? Math.min(100, (resumeFrom / history.totalBytes) * 100) : 0,
+      downloadedBytes: resumeFrom,
+      totalBytes: history.totalBytes || 0,
+      speed: 0,
+      type: history.type || 'http'
+    };
+    this.downloads.set(id, item);
+    db.updateDownloadHistory(id, { status: 'downloading' });
+    this._emitProgress();
+    this._performHttpDownload(id, item.url, filePath, resumeFrom);
+    return { success: true };
   }
 
   retryDownload(id) {
@@ -492,9 +584,11 @@ class Downloader {
 
   removeDownload(id) {
     const item = this.downloads.get(id);
-    if (!item) return;
-    if (item.status === 'downloading') this.cancelDownload(id);
-    this.downloads.delete(id);
+    if (item) {
+      if (item.status === 'downloading') this.cancelDownload(id);
+      this.downloads.delete(id);
+    }
+    db.removeDownloadFromHistory(id);
     this._emitProgress();
   }
 
@@ -530,6 +624,7 @@ class Downloader {
     };
     
     this.downloads.set(id, downloadItem);
+    db.addDownloadToHistory(downloadItem);
     this._emitProgress();
 
     let lastTime = Date.now();
@@ -567,13 +662,29 @@ class Downloader {
         downloadItem.progress = 100;
         downloadItem.speed = 0;
         db.addDownloadToHistory(downloadItem);
+        db.updateDownloadHistory(downloadItem.id, {
+          status: 'completed',
+          downloadedBytes: downloadItem.totalBytes,
+          totalBytes: downloadItem.totalBytes
+        });
         this._scheduleAutoRemove(downloadItem.id);
       } else if (state === 'cancelled') {
         downloadItem.status = 'cancelled';
+        db.updateDownloadHistory(downloadItem.id, {
+          status: 'interrupted',
+          downloadedBytes: downloadItem.downloadedBytes || 0,
+          totalBytes: downloadItem.totalBytes || 0
+        });
       } else {
         downloadItem.status = 'error';
         downloadItem.error = `Failed: ${state}`;
         downloadItem.speed = 0;
+        db.updateDownloadHistory(downloadItem.id, {
+          status: 'error',
+          downloadedBytes: downloadItem.downloadedBytes || 0,
+          totalBytes: downloadItem.totalBytes || 0,
+          error: `Failed: ${state}`
+        });
       }
       this._emitProgress();
       this._processQueue();
@@ -581,6 +692,20 @@ class Downloader {
   }
 
   _emitProgress() {
+    // Throttled persistence of partial progress so a half-downloaded file
+    // can be resumed after an app restart (writes at most every 5s per item).
+    const now = Date.now();
+    for (const [, item] of this.downloads) {
+      if (item.status === 'downloading' && (item._lastHistSave || 0) + 5000 < now) {
+        item._lastHistSave = now;
+        db.updateDownloadHistory(item.id, {
+          status: 'downloading',
+          downloadedBytes: item.downloadedBytes || 0,
+          totalBytes: item.totalBytes || 0
+        });
+      }
+    }
+
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       const downloadsArray = Array.from(this.downloads.values()).map(d => {
         const { torrentInfo, electronItem, ...safeData } = d;

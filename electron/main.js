@@ -1119,6 +1119,13 @@ ipcMain.handle('resume-download', (event, id) => {
   }
 });
 
+ipcMain.handle('continue-download', (event, id) => {
+  if (globalDownloader) {
+    return globalDownloader.resumeFromHistory(id);
+  }
+  return { error: 'Downloader not initialized' };
+});
+
 ipcMain.handle('retry-download', (event, id) => {
   if (globalDownloader) {
     globalDownloader.retryDownload(id);

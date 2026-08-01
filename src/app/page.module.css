@@ -1,8 +1,14 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
 .hero {
-  min-height: calc(100vh - 60px);
+  min-height: calc(100vh - 300px);
   align-items: center;
   justify-content: center;
-  padding: 40px;
+  padding: 40px 40px 10px;
   display: flex;
 }
 

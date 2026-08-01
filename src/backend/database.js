@@ -71,11 +71,25 @@ class Database {
         totalBytes: downloadItem.totalBytes,
         downloadedBytes: downloadItem.downloadedBytes || 0,
         source: downloadItem.meta?.source || 'Unknown',
-        status: downloadItem.status || 'completed',
-        dateCompleted: new Date().toISOString()
+        status: downloadItem.status || 'downloading',
+        dateStarted: new Date().toISOString(),
+        dateCompleted: null
       });
       this._saveData();
     }
+  }
+
+  updateDownloadHistory(id, patch) {
+    const entry = this.data.downloadHistory.find(d => d.id === id);
+    if (entry) {
+      Object.assign(entry, patch);
+      if (patch.status === 'completed' && !entry.dateCompleted) {
+        entry.dateCompleted = new Date().toISOString();
+      }
+      this._saveData();
+      return entry;
+    }
+    return null;
   }
 
   updateDownloadHistoryStatus(id, status) {

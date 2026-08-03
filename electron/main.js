@@ -317,7 +317,11 @@ const tflAutoClickScript = `
     try {
       const statusEl = document.getElementById('ugc-tfl-status');
       const subEl = document.getElementById('ugc-tfl-sub');
-      const setStatus = (msg) => { if (statusEl) statusEl.innerText = msg; };
+      const setStatus = (msg) => {
+        if (statusEl) statusEl.innerText = msg;
+        const t2 = document.getElementById('ugc-custom-timer');
+        if (t2) t2.innerText = msg;
+      };
       if (subEl) subEl.innerText = location.href;
 
       const dl1Done = sessionStorage.getItem('ugcTflDl1') === '1';
@@ -825,123 +829,110 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
 
               if (window.hasClicked) return;
 
-              const apunLinks = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"], a#dlink')).filter(el => {
-                const text = (el.innerText || el.textContent || el.value || '').toLowerCase();
-                const hasProceedImg = el.querySelector ? el.querySelector('img[src*="proceed"]') : null;
-                return text.includes('click here to download') || text.includes('proceed to download') || text.includes('download now') || text.includes('download this game') || hasProceedImg || el.id === 'dlink';
-              });
-              
-              if (apunLinks.length > 0) {
-                const target = apunLinks[0];
-                if (!target.disabled && target.offsetWidth > 0 && target.offsetHeight > 0) {
-                  setStatus('Found download link! Waiting 5s...');
-                  window.hasClicked = true;
-                  
-                  setTimeout(() => {
-                    setStatus('Proceeding...');
-                    if (target.tagName.toLowerCase() === 'a' && target.href) {
-                      window.location.href = target.href;
-                    } else {
-                      const form = target.closest('form');
-                      if (form) {
-                         form.submit();
-                      } else {
-                         target.removeAttribute('target');
-                         target.click();
-                      }
-                    }
-                    setTimeout(() => { window.hasClicked = false; }, 4000);
-                  }, 5000);
-                }
-                return;
-              }
+              // TheFilesLocker pages are handled entirely by the retry-safe
+              // tflAutoClickScript appended below (auto-submit download1 ->
+              // download2 with countdown/captcha -> final /d/ link). Skip all
+              // generic handling on TFL pages so ad links can't hijack the flow.
+              const isTflPage = window.location.hostname.includes('thefileslocker');
 
-              // akglinks.com: hoster chooser / shortener page. The primary host
-              // (TheFilesLocker) is preferred; fall back to any host row, then to
-              // a generic "Continue" style button for classic shortener layouts.
-              if (window.location.hostname.includes('akglinks') && !window.ugcAkgClicked) {
-                const hostBtn = document.querySelector('a.download-btn.primary-host') ||
-                                document.querySelector('a.download-btn[href]');
-                const contBtn = hostBtn || Array.from(document.querySelectorAll('a, button')).find(el => {
-                  const text = (el.innerText || el.value || '').toLowerCase();
-                  return el.href && /continue|skip|get link|proceed|visit link/i.test(text);
+              if (!isTflPage) {
+                const apunLinks = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"], a#dlink')).filter(el => {
+                  const text = (el.innerText || el.textContent || el.value || '').toLowerCase();
+                  const hasProceedImg = el.querySelector ? el.querySelector('img[src*="proceed"]') : null;
+                  return text.includes('click here to download') || text.includes('proceed to download') || text.includes('download now') || text.includes('download this game') || hasProceedImg || el.id === 'dlink';
                 });
-                if (contBtn && contBtn.href) {
-                  window.ugcAkgClicked = true;
-                  setStatus('Picking download host (TheFilesLocker)...');
-                  setTimeout(() => {
-                    setStatus('Proceeding...');
-                    window.location.href = contBtn.href;
-                    setTimeout(() => { window.ugcAkgClicked = false; }, 4000);
-                  }, 1000);
-                  return;
-                }
-              }
 
-              // apunkasoftware.net: intermediate page listing "Download Part N"
-              // forms. Submitting the first form POSTs to download-process.php,
-              // which redirects to the real TheFilesLocker file page.
-              if (window.location.hostname.includes('apunkasoftware') && !window.ugcPartSubmitted) {
-                const partForm = document.querySelector('form[action*="download-process.php"]');
-                if (partForm) {
-                  window.ugcPartSubmitted = true;
-                  setStatus('Submitting download part form...');
-                  setTimeout(() => {
-                    setStatus('Proceeding...');
-                    try { partForm.submit(); } catch (e) { /* page may have navigated */ }
-                    setTimeout(() => { window.ugcPartSubmitted = false; }, 4000);
-                  }, 1000);
-                  return;
-                }
-              }
-              
-              if (window.location.hostname.includes('thefileslocker')) {
-                const methodFreeBtn = document.querySelector('input[name="method_free"], button[name="method_free"]');
-                if (methodFreeBtn && !methodFreeBtn.disabled) {
-                  setStatus('Bypassing clickjack overlay! Waiting 5s...');
-                  window.hasClicked = true;
-                  setTimeout(() => {
-                    setStatus('Proceeding...');
-                    const form = methodFreeBtn.closest('form');
-                    if (form) form.submit();
-                    else methodFreeBtn.click();
-                    setTimeout(() => { window.hasClicked = false; }, 4000);
-                  }, 5000);
-                  return;
-                }
-                
-                const createBtn = document.getElementById('download') || document.querySelector('.download-btn') || document.querySelector('#downloadbtn, input[value*="Create"]');
-                const hasCaptcha = document.querySelector('.g-recaptcha, iframe[src*="recaptcha"]');
-                const captchaOk2 = !hasCaptcha || (window.grecaptcha && window.grecaptcha.getResponse && window.grecaptcha.getResponse().length > 0);
-                
-                if (createBtn && !createBtn.disabled && createBtn.style.display !== 'none' && captchaOk2) {
-                  setStatus('Generating final download link! Waiting 5s...');
-                  window.hasClicked = true;
-                  setTimeout(() => {
-                    setStatus('Proceeding...');
-                    sessionStorage.setItem('ugcSgDl2', '1');
-                    const form = createBtn.closest('form');
-                    if (form) form.submit();
-                    else createBtn.click();
-                    setTimeout(() => { window.hasClicked = false; }, 4000);
-                  }, 5000);
-                  return;
-                }
-                
-                // Final direct link: only look for it AFTER "Create" was submitted,
-                // so ad links on the create page can't hijack the flow.
-                // ugcSgDl2 persists across navigations via sessionStorage.
-                if (sessionStorage.getItem('ugcSgDl2') === '1' || window.ugcSgSubmitted) {
-                  const finalLink = document.querySelector('a.btn-primary[href*="/d/"], a.download-link, a#download_link, a.btn-download, a[href*="/d/"], a[href*="/file/"]');
-                  if (finalLink && !finalLink.disabled && finalLink.href) {
-                    setStatus('Intercepting raw game file! Waiting 5s...');
+                if (apunLinks.length > 0) {
+                  const target = apunLinks[0];
+                  if (!target.disabled && target.offsetWidth > 0 && target.offsetHeight > 0) {
+                    setStatus('Found download link! Waiting 5s...');
                     window.hasClicked = true;
+
                     setTimeout(() => {
-                      setStatus('Downloading...');
-                      window.location.href = finalLink.href;
+                      setStatus('Proceeding...');
+                      if (target.tagName.toLowerCase() === 'a' && target.href) {
+                        window.location.href = target.href;
+                      } else {
+                        const form = target.closest('form');
+                        if (form) {
+                           form.submit();
+                        } else {
+                           target.removeAttribute('target');
+                           target.click();
+                        }
+                      }
                       setTimeout(() => { window.hasClicked = false; }, 4000);
                     }, 5000);
+                  }
+                  return;
+                }
+
+                // ---- ApunKaGames-style shortener / vlink chain ----
+                // The same chain appears under akglinks.com and apunkasoftware.net:
+                //   chooser page  a.download-btn.primary-host        (TheFilesLocker)
+                //   intermediate  a[href*=".../vlink/"]              ("Setup install")
+                //   part page     form[action*="download-process.php"] with hidden
+                //                 input[name="file"] = thefileslocker.net URL
+                //   part page     a#dlink -> thefileslocker.net file page
+                // The hidden file input is the most reliable hop: navigating
+                // straight to it equals what the ApunKaGames provider does
+                // server-side (no POST through download-process.php needed).
+                if (!window.ugcChainBusy) {
+                  // (a) part page: gip_form hidden file input
+                  const partForm = document.querySelector('form[action*="download-process.php"]');
+                  if (partForm) {
+                    const fileInput = partForm.querySelector('input[name="file"]');
+                    const tflUrl = fileInput && fileInput.value;
+                    if (tflUrl && /thefileslocker\.net/i.test(tflUrl)) {
+                      window.ugcChainBusy = true;
+                      setStatus('Opening TheFilesLocker file page...');
+                      setTimeout(() => {
+                        setStatus('Proceeding...');
+                        window.location.href = tflUrl;
+                        setTimeout(() => { window.ugcChainBusy = false; }, 4000);
+                      }, 800);
+                      return;
+                    }
+                  }
+                  // (b) part page: a#dlink proceed link
+                  const dlinkEl = document.getElementById('dlink');
+                  if (dlinkEl && dlinkEl.href) {
+                    window.ugcChainBusy = true;
+                    setStatus('Opening TheFilesLocker file page...');
+                    setTimeout(() => {
+                      setStatus('Proceeding...');
+                      window.location.href = dlinkEl.href;
+                      setTimeout(() => { window.ugcChainBusy = false; }, 4000);
+                    }, 800);
                     return;
+                  }
+                  // (c) hoster chooser: primary host button (TheFilesLocker)
+                  const hostBtn = document.querySelector('a.download-btn.primary-host') ||
+                                  document.querySelector('a.download-btn[href]');
+                  if (hostBtn && hostBtn.href) {
+                    window.ugcChainBusy = true;
+                    setStatus('Picking download host (TheFilesLocker)...');
+                    setTimeout(() => {
+                      setStatus('Proceeding...');
+                      window.location.href = hostBtn.href;
+                      setTimeout(() => { window.ugcChainBusy = false; }, 4000);
+                    }, 800);
+                    return;
+                  }
+                  // (d) intermediate vlink page: follow the first remaining
+                  // vlink link to reach the part page that has the form.
+                  if (/akglinks|apunkasoftware/i.test(window.location.hostname)) {
+                    const vlinkEl = document.querySelector('a[href*="apunkasoftware.net/vlink/"], a[href*="akglinks.com/vlink/"]');
+                    if (vlinkEl && vlinkEl.href) {
+                      window.ugcChainBusy = true;
+                      setStatus('Following download page link...');
+                      setTimeout(() => {
+                        setStatus('Proceeding...');
+                        window.location.href = vlinkEl.href;
+                        setTimeout(() => { window.ugcChainBusy = false; }, 4000);
+                      }, 800);
+                      return;
+                    }
                   }
                 }
               }
@@ -949,6 +940,12 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
                console.error('Auto-clicker error:', e);
             }
           }, 1000);
+
+          // TheFilesLocker pages: reuse the same retry-safe auto-clicker that
+          // the dedicated TFL download window uses (download1 auto-submit ->
+          // download2 countdown/captcha -> final /d/ link). The window-guard
+          // pattern keeps it safe across TFL ad-interstitial navigations.
+          ${tflAutoClickScript}
         `).catch(err => console.error('Script injection failed:', err));
       });
       

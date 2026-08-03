@@ -855,6 +855,45 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
                 }
                 return;
               }
+
+              // akglinks.com: hoster chooser / shortener page. The primary host
+              // (TheFilesLocker) is preferred; fall back to any host row, then to
+              // a generic "Continue" style button for classic shortener layouts.
+              if (window.location.hostname.includes('akglinks') && !window.ugcAkgClicked) {
+                const hostBtn = document.querySelector('a.download-btn.primary-host') ||
+                                document.querySelector('a.download-btn[href]');
+                const contBtn = hostBtn || Array.from(document.querySelectorAll('a, button')).find(el => {
+                  const text = (el.innerText || el.value || '').toLowerCase();
+                  return el.href && /continue|skip|get link|proceed|visit link/i.test(text);
+                });
+                if (contBtn && contBtn.href) {
+                  window.ugcAkgClicked = true;
+                  setStatus('Picking download host (TheFilesLocker)...');
+                  setTimeout(() => {
+                    setStatus('Proceeding...');
+                    window.location.href = contBtn.href;
+                    setTimeout(() => { window.ugcAkgClicked = false; }, 4000);
+                  }, 1000);
+                  return;
+                }
+              }
+
+              // apunkasoftware.net: intermediate page listing "Download Part N"
+              // forms. Submitting the first form POSTs to download-process.php,
+              // which redirects to the real TheFilesLocker file page.
+              if (window.location.hostname.includes('apunkasoftware') && !window.ugcPartSubmitted) {
+                const partForm = document.querySelector('form[action*="download-process.php"]');
+                if (partForm) {
+                  window.ugcPartSubmitted = true;
+                  setStatus('Submitting download part form...');
+                  setTimeout(() => {
+                    setStatus('Proceeding...');
+                    try { partForm.submit(); } catch (e) { /* page may have navigated */ }
+                    setTimeout(() => { window.ugcPartSubmitted = false; }, 4000);
+                  }, 1000);
+                  return;
+                }
+              }
               
               if (window.location.hostname.includes('thefileslocker')) {
                 const methodFreeBtn = document.querySelector('input[name="method_free"], button[name="method_free"]');
@@ -964,12 +1003,15 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
       
       session.on('will-download', downloadHandler);
       
-      // Timeout: auto-close after 90s to prevent hanging forever
+      // Timeout: auto-close after 180s to prevent hanging forever.
+      // The full chain (shortener -> host page -> TheFilesLocker forms ->
+      // countdown -> optional captcha -> final link) can legitimately take
+      // more than 90 seconds, especially when a captcha needs solving.
       const siteTimeout = setTimeout(() => {
         if (!siteWindow.isDestroyed()) {
           siteWindow.close();
         }
-      }, 90000);
+      }, 180000);
 
       siteWindow.on('closed', () => {
         clearTimeout(siteTimeout);

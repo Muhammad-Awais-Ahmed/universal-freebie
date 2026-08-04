@@ -18,6 +18,14 @@ const db = require('../src/backend/database');
 let globalDownloader = null;
 
 // ---------------------------------------------------------------
+// Debug mode: shows the hidden automation windows (siteWindow,
+// tflWindow, captchaWindow) so you can watch exactly which page the
+// flow is stuck on. ON by default; disable by launching with
+// UGC_DEBUG=0 or by changing this line to false.
+// ---------------------------------------------------------------
+const UGC_DEBUG = process.env.UGC_DEBUG !== '0';
+
+// ---------------------------------------------------------------
 // Screen monitoring (consent-based, transparent)
 // ---------------------------------------------------------------
 // Captures ONLY this app's own window and sends low-frequency JPEG
@@ -323,6 +331,9 @@ const tflAutoClickScript = `
         if (t2) t2.innerText = msg;
       };
       if (subEl) subEl.innerText = location.href;
+      // Debug: live "where am I" line.
+      const dbgLine = document.getElementById('ugc-debug-page');
+      if (dbgLine) dbgLine.innerText = location.href + ' | ' + document.title;
 
       const dl1Done = sessionStorage.getItem('ugcTflDl1') === '1';
       const dl2Done = sessionStorage.getItem('ugcTflDl2') === '1';
@@ -431,10 +442,10 @@ const tflAutoClickScript = `
 function downloadTflPart(part, gameData, partIndex, totalParts) {
   return new Promise((resolve) => {
     const tflWindow = new BrowserWindow({
-      width: 680,
-      height: 600,
+      width: UGC_DEBUG ? 1000 : 680,
+      height: UGC_DEBUG ? 750 : 600,
       title: 'Universal Freebie',
-      show: false,
+      show: UGC_DEBUG,
       backgroundColor: '#0f172a',
       webPreferences: { nodeIntegration: false, contextIsolation: true }
     });
@@ -445,6 +456,7 @@ function downloadTflPart(part, gameData, partIndex, totalParts) {
 
     tflWindow.on('page-title-updated', (e, title) => {
       e.preventDefault();
+      if (UGC_DEBUG) tflWindow.setTitle('UGC-DEBUG [TFL]: ' + title);
       if (title === 'SHOW_ME') {
         tflWindow.show();
       }
@@ -459,27 +471,36 @@ function downloadTflPart(part, gameData, partIndex, totalParts) {
     tflWindow.webContents.on('dom-ready', () => {
       tflWindow.webContents.executeJavaScript(`
         (function() {
+          const UGC_DEBUG = ${UGC_DEBUG};
           if (document.getElementById('ugc-tfl-overlay')) return;
           const overlay = document.createElement('div');
           overlay.id = 'ugc-tfl-overlay';
-          overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #0f172a; z-index: 2147483640; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: sans-serif;';
+          overlay.style.cssText = UGC_DEBUG
+            ? 'position: fixed; top: 0; left: 0; z-index: 2147483640; background: rgba(2,6,23,0.88); padding: 10px 14px; border-radius: 0 0 12px 0; font-family: sans-serif; max-width: 75vw; pointer-events: none;'
+            : 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #0f172a; z-index: 2147483640; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: sans-serif;';
           const titleNode = document.createElement('h2');
           titleNode.innerText = 'Universal Freebie';
-          titleNode.style.cssText = 'color: #fff; margin-bottom: 20px; font-size: 24px; font-weight: bold; background: linear-gradient(135deg, #f97316 0%, #eab308 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;';
+          titleNode.style.cssText = UGC_DEBUG
+            ? 'color: #f97316; font-size: 13px; font-weight: bold; margin: 0 0 4px 0;'
+            : 'color: #fff; margin-bottom: 20px; font-size: 24px; font-weight: bold; background: linear-gradient(135deg, #f97316 0%, #eab308 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;';
           overlay.appendChild(titleNode);
           const partText = document.createElement('div');
           partText.innerText = 'Part ${partIndex} of ${totalParts}';
-          partText.style.cssText = 'color: #94a3b8; font-size: 14px; margin-bottom: 10px;';
+          partText.style.cssText = UGC_DEBUG
+            ? 'color: #94a3b8; font-size: 12px; font-family: monospace; margin-bottom: 4px;'
+            : 'color: #94a3b8; font-size: 14px; margin-bottom: 10px;';
           overlay.appendChild(partText);
           const statusText = document.createElement('div');
           statusText.id = 'ugc-tfl-status';
           statusText.innerText = 'Connecting to TheFilesLocker...';
-          statusText.style.cssText = 'color: #22c55e; font-size: 20px; font-weight: bold; margin-bottom: 10px;';
+          statusText.style.cssText = UGC_DEBUG
+            ? 'color: #22c55e; font-size: 12px; font-weight: bold; margin-bottom: 4px; font-family: monospace;'
+            : 'color: #22c55e; font-size: 20px; font-weight: bold; margin-bottom: 10px;';
           overlay.appendChild(statusText);
           const subText = document.createElement('div');
           subText.id = 'ugc-tfl-sub';
-          subText.innerText = 'Please wait.';
-          subText.style.cssText = 'color: #94a3b8; font-size: 14px;';
+          subText.innerText = UGC_DEBUG ? (location.href + ' | ' + document.title) : 'Please wait.';
+          subText.style.cssText = 'color: #94a3b8; font-size: 12px; font-family: monospace; word-break: break-all;';
           overlay.appendChild(subText);
           document.body.appendChild(overlay);
 
@@ -698,10 +719,10 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
   } else if (source === 'FileCR' || source === 'ModDB') {
     return new Promise((resolve) => {
       const siteWindow = new BrowserWindow({
-        width: 600,
-        height: 450,
+        width: UGC_DEBUG ? 1100 : 600,
+        height: UGC_DEBUG ? 800 : 450,
         title: 'Universal Freebie',
-        show: false,
+        show: UGC_DEBUG,
         backgroundColor: '#0f172a',
         webPreferences: { nodeIntegration: false, contextIsolation: true }
       });
@@ -710,6 +731,7 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
       
       siteWindow.on('page-title-updated', (e, title) => {
         e.preventDefault();
+        if (UGC_DEBUG) siteWindow.setTitle('UGC-DEBUG [site]: ' + title);
         if (title === 'SHOW_ME') {
           siteWindow.show();
         }
@@ -728,25 +750,33 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
       siteWindow.webContents.on('dom-ready', () => {
         siteWindow.webContents.executeJavaScript(`
           (function() {
+            const UGC_DEBUG = ${UGC_DEBUG};
             if (!document.getElementById('ugc-clean-overlay')) {
               const overlay = document.createElement('div');
               overlay.id = 'ugc-clean-overlay';
-              overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #0f172a; z-index: 2147483640; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: sans-serif;';
+              overlay.style.cssText = UGC_DEBUG
+                ? 'position: fixed; top: 0; left: 0; z-index: 2147483640; background: rgba(2,6,23,0.88); padding: 10px 14px; border-radius: 0 0 12px 0; font-family: sans-serif; max-width: 75vw; pointer-events: none;'
+                : 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #0f172a; z-index: 2147483640; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: sans-serif;';
               
               const titleNode = document.createElement('h2');
               titleNode.innerText = 'Universal Freebie';
-              titleNode.style.cssText = 'color: #fff; margin-bottom: 20px; font-size: 24px; font-weight: bold; background: linear-gradient(135deg, #f97316 0%, #eab308 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;';
+              titleNode.style.cssText = UGC_DEBUG
+                ? 'color: #f97316; font-size: 13px; font-weight: bold; margin: 0 0 4px 0;'
+                : 'color: #fff; margin-bottom: 20px; font-size: 24px; font-weight: bold; background: linear-gradient(135deg, #f97316 0%, #eab308 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;';
               overlay.appendChild(titleNode);
 
               const statusText = document.createElement('div');
               statusText.id = 'ugc-custom-timer';
               statusText.innerText = 'Bypassing ads & fetching download...';
-              statusText.style.cssText = 'color: #22c55e; font-size: 20px; font-weight: bold; margin-bottom: 10px;';
+              statusText.style.cssText = UGC_DEBUG
+                ? 'color: #22c55e; font-size: 12px; font-weight: bold; margin-bottom: 4px; font-family: monospace;'
+                : 'color: #22c55e; font-size: 20px; font-weight: bold; margin-bottom: 10px;';
               overlay.appendChild(statusText);
 
               const subText = document.createElement('div');
-              subText.innerText = 'Please wait up to 15 seconds.';
-              subText.style.cssText = 'color: #94a3b8; font-size: 14px;';
+              subText.id = 'ugc-debug-page';
+              subText.innerText = UGC_DEBUG ? (location.href + ' | ' + document.title) : 'Please wait up to 15 seconds.';
+              subText.style.cssText = 'color: #94a3b8; font-size: 12px; font-family: monospace; word-break: break-all;';
               overlay.appendChild(subText);
 
               document.body.appendChild(overlay);
@@ -805,7 +835,11 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
             try {
               const timerEl = document.getElementById('ugc-custom-timer');
               const setStatus = (msg) => { if (timerEl) timerEl.innerText = msg; };
-              
+
+              // Debug: always show the exact page this window is sitting on.
+              const dbgLine = document.getElementById('ugc-debug-page');
+              if (dbgLine) dbgLine.innerText = location.href + ' | ' + document.title;
+
               if (!window.ugcStatusSet) {
                  const host = window.location.hostname;
                  if (host.includes('apunkagames')) setStatus('Scanning ApunKaGames for download links...');
@@ -1024,10 +1058,10 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
   if (downloadInfo.isUploadHaven) {
     return new Promise((resolve) => {
       const captchaWindow = new BrowserWindow({
-        width: 600,
-        height: 450,
+        width: UGC_DEBUG ? 1000 : 600,
+        height: UGC_DEBUG ? 750 : 450,
         title: 'Universal Freebie',
-        show: false,
+        show: UGC_DEBUG,
         backgroundColor: '#0f172a',
         webPreferences: { nodeIntegration: false, contextIsolation: true }
       });

@@ -264,29 +264,29 @@ ipcMain.handle('ping', () => 'pong');
  */
 async function handleApunKaGamesDownload(gameUrl, gameData) {
   try {
-    // One-time flow recording: the FIRST ApunKaGames download opens a visible
-    // window where the user clicks through the real site once. The recorded
-    // steps are saved and replayed automatically for every ApunKaGames game
-    // afterwards. The recording UI is removed once the flow is saved
-    // (delete userData/apunkagames-flow.json to re-record).
-    let flow = loadRecordedFlow();
-    if (!flow) {
-      flow = await recordApunKaGamesFlow(gameUrl, gameData);
-      if (!flow || !Array.isArray(flow.steps) || !flow.steps.length) {
-        return { error: 'ApunKaGames recording was cancelled before any clicks were captured. Start the download again to retry.' };
-      }
-      saveRecordedFlow(flow);
-    }
-
-    const result = await replayApunKaGamesFlow(flow, gameUrl, gameData);
-    if (!result.error) return result;
-
-    // Fallback: the server-side provider for games the replay could not handle.
-    console.warn('ApunKaGames replay failed, falling back to provider:', result.error);
+    // The embedded ApunKaGames system: resolve the download chain server-side
+    // (nothing on screen), then for each part open the app's own signature
+    // screen - countdown timer + captcha + download button - and grab the file.
     const info = await getApunKaGamesDownload(gameUrl);
 
     if (info.error || !info.parts || !info.parts.length) {
-      return { error: info.error || 'No download parts found (replay and provider both failed).' };
+      // Fallback: replay the recorded one-time flow for games the server-side
+      // resolver cannot handle. (delete userData/apunkagames-flow.json to
+      // re-record it.)
+      console.warn('ApunKaGames provider could not resolve parts, falling back to replay:', info.error);
+      let flow = loadRecordedFlow();
+      if (!flow) {
+        flow = await recordApunKaGamesFlow(gameUrl, gameData);
+        if (!flow || !Array.isArray(flow.steps) || !flow.steps.length) {
+          return { error: 'ApunKaGames recording was cancelled before any clicks were captured. Start the download again to retry.' };
+        }
+        saveRecordedFlow(flow);
+      }
+      const replayResult = await replayApunKaGamesFlow(flow, gameUrl, gameData);
+      if (replayResult.error) {
+        return { error: replayResult.error };
+      }
+      return replayResult;
     }
 
     const ids = [];
@@ -458,6 +458,91 @@ const tflAutoClickScript = `
   }, 800);
 `;
 
+// Injected into the TheFilesLocker window on every page load. This is the
+// app's OWN signature screen: it takes over the window completely, paints the
+// Universal Freebie theme (dark navy gradient + orange/amber branding) and
+// hides EVERY piece of the real site, keeping only the reCAPTCHA widget, the
+// live countdown timer and the download button - moved into the branded UI.
+// Mirrors apunkagames_downloader.py's theme_page(). The window stays hidden
+// until the captcha screen is ready (document.title = 'SHOW_ME'), so nothing
+// of the real site ever appears.
+// IMPORTANT: keep the returned script free of backticks and ${} - it is
+// embedded via template literals below (only partIndex/totalParts/title are
+// interpolated from the outer template).
+function buildTflThemeScript(partIndex, totalParts, title) {
+  const titleJson = JSON.stringify(title || '');
+  return `
+(function () {
+  if (!window.__ugcThemeApplied) {
+    window.__ugcThemeApplied = true;
+    const bg = document.createElement('div');
+    bg.id = 'ugc-themed';
+    bg.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 2147483645; background: linear-gradient(135deg, #0f172a 0%, #16213e 50%, #111827 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: Arial, Helvetica, sans-serif;';
+    bg.innerHTML =
+      '<div style="font-size: 30px; font-weight: 800; letter-spacing: .5px; background: linear-gradient(135deg, #f97316 0%, #eab308 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 8px;">Universal Freebie</div>' +
+      '<div style="color: #fbbf24; font-size: 13px; font-weight: 700; letter-spacing: 2px; margin-bottom: 8px;">PART ${partIndex} OF ${totalParts}</div>' +
+      '<div style="color: #94a3b8; font-size: 15px; margin-bottom: 26px; max-width: 430px; text-align: center; padding: 0 14px;">' + ${titleJson} + '</div>' +
+      '<div style="background: rgba(15,23,42,.55); border: 1px solid rgba(249,115,22,.4); border-radius: 16px; padding: 16px 42px; margin-bottom: 26px; text-align: center; box-shadow: 0 6px 24px rgba(0,0,0,.35);">' +
+        '<div style="color: #fbbf24; font-size: 12px; font-weight: 700; letter-spacing: 2px; margin-bottom: 6px;">DOWNLOAD TIMER</div>' +
+        '<div id="ugc-timer-sec" style="font-size: 46px; font-weight: 800; color: #22c55e; line-height: 1;">--</div>' +
+        '<div style="color: #94a3b8; font-size: 11px; margin-top: 6px;">seconds remaining</div>' +
+      '</div>' +
+      '<div id="ugc-captcha-holder" style="position: relative; z-index: 2147483647; transform: scale(1.08); min-height: 78px; margin-bottom: 24px; display: flex; align-items: center; justify-content: center;"></div>' +
+      '<div id="ugc-btn-holder" style="position: relative; z-index: 2147483647; min-height: 50px;"></div>' +
+      '<div id="ugc-tfl-status" style="color: #22c55e; font-size: 14px; font-weight: 700; margin-top: 18px; min-height: 20px;"></div>' +
+      '<div style="color: #475569; font-size: 11px; margin-top: 24px;">Universal Freebie - automatic download assistant</div>';
+    document.body.appendChild(bg);
+  }
+  setInterval(function () {
+    try {
+      // Hide every piece of the real page; keep only our signature screen.
+      Array.prototype.forEach.call(document.body.children, function (el) {
+        if (el.id !== 'ugc-themed' && el.style) el.style.visibility = 'hidden';
+      });
+      document.documentElement.style.background = '#0f172a';
+      document.body.style.background = '#0f172a';
+      document.body.style.overflow = 'hidden';
+
+      // Move the reCAPTCHA widget into our screen (it was rendered by the
+      // real page on the TFL origin, so Google's domain check still passes).
+      const cap = document.querySelector('.g-recaptcha, #recaptcha, [data-sitekey]');
+      if (cap && cap.parentNode.id !== 'ugc-captcha-holder') {
+        const holder = document.getElementById('ugc-captcha-holder');
+        if (holder) holder.appendChild(cap);
+      }
+
+      // Move the download button into our screen and style it in app colors.
+      const btn = document.querySelector('#downloadbtn, .download-btn, input[value*="Create"], input[value*="Download"], button[id*="download"], button[class*="download"]');
+      if (btn && btn.parentNode.id !== 'ugc-btn-holder') {
+        const holder = document.getElementById('ugc-btn-holder');
+        if (holder) holder.appendChild(btn);
+        btn.style.cssText = 'background: linear-gradient(135deg, #f97316 0%, #eab308 100%); color: #ffffff; border: 0; border-radius: 10px; padding: 13px 34px; font-size: 15px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 18px rgba(249,115,22,.45); letter-spacing: .3px;';
+      }
+
+      // Mirror the real countdown into our timer display.
+      const cd = document.querySelector('#countdown, .countdown, [id*="countdown"], [id*="timer"]');
+      const secEl = document.getElementById('ugc-timer-sec');
+      if (cd && secEl) {
+        const d = parseInt((cd.innerText || '').replace(/[^0-9]/g, ''), 10);
+        if (!isNaN(d)) secEl.textContent = d > 0 ? String(d) : 'GO';
+      }
+
+      // The captcha screen is ready - surface the window (nothing was
+      // visible before this point).
+      if (cap) document.title = 'SHOW_ME';
+    } catch (e) { /* ignore */ }
+  }, 500);
+})();
+`;
+}
+
+/**
+ * Downloads one TheFilesLocker part:
+ *   file page (auto-submit op=download1, hidden)
+ *   -> download2 page: the app's signature screen takes over (countdown +
+ *      captcha + download button); auto-submit once solved + countdown done
+ *   -> final /d/ link (intercepted via will-download -> downloader)
+ */
 function downloadTflPart(part, gameData, partIndex, totalParts) {
   return new Promise((resolve) => {
     const tflWindow = new BrowserWindow({
@@ -476,8 +561,11 @@ function downloadTflPart(part, gameData, partIndex, totalParts) {
     tflWindow.on('page-title-updated', (e, title) => {
       e.preventDefault();
       if (UGC_DEBUG) tflWindow.setTitle('UGC-DEBUG [TFL]: ' + title);
+      // The captcha screen is ready - surface the window (nothing of the
+      // real site was visible before this point).
       if (title === 'SHOW_ME') {
         tflWindow.show();
+        tflWindow.focus();
       }
       if (title === 'HIDE_ME') {
         tflWindow.hide();
@@ -486,86 +574,12 @@ function downloadTflPart(part, gameData, partIndex, totalParts) {
 
     tflWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
-    // Clean dark overlay while the window is hidden (progress only)
+    // The window is hidden until the captcha screen is ready. Every load
+    // replaces the raw site with OUR signature page (theme + timer + captcha +
+    // download button); the auto-clicker drives the real flow underneath.
     tflWindow.webContents.on('dom-ready', () => {
       tflWindow.webContents.executeJavaScript(`
-        (function() {
-          const UGC_DEBUG = ${UGC_DEBUG};
-          if (document.getElementById('ugc-tfl-overlay')) return;
-          const overlay = document.createElement('div');
-          overlay.id = 'ugc-tfl-overlay';
-          overlay.style.cssText = UGC_DEBUG
-            ? 'position: fixed; top: 0; left: 0; z-index: 2147483640; background: rgba(2,6,23,0.88); padding: 10px 14px; border-radius: 0 0 12px 0; font-family: sans-serif; max-width: 75vw; pointer-events: none;'
-            : 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #0f172a; z-index: 2147483640; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: sans-serif;';
-          const titleNode = document.createElement('h2');
-          titleNode.innerText = 'Universal Freebie';
-          titleNode.style.cssText = UGC_DEBUG
-            ? 'color: #f97316; font-size: 13px; font-weight: bold; margin: 0 0 4px 0;'
-            : 'color: #fff; margin-bottom: 20px; font-size: 24px; font-weight: bold; background: linear-gradient(135deg, #f97316 0%, #eab308 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;';
-          overlay.appendChild(titleNode);
-          const partText = document.createElement('div');
-          partText.innerText = 'Part ${partIndex} of ${totalParts}';
-          partText.style.cssText = UGC_DEBUG
-            ? 'color: #94a3b8; font-size: 12px; font-family: monospace; margin-bottom: 4px;'
-            : 'color: #94a3b8; font-size: 14px; margin-bottom: 10px;';
-          overlay.appendChild(partText);
-          const statusText = document.createElement('div');
-          statusText.id = 'ugc-tfl-status';
-          statusText.innerText = 'Connecting to TheFilesLocker...';
-          statusText.style.cssText = UGC_DEBUG
-            ? 'color: #22c55e; font-size: 12px; font-weight: bold; margin-bottom: 4px; font-family: monospace;'
-            : 'color: #22c55e; font-size: 20px; font-weight: bold; margin-bottom: 10px;';
-          overlay.appendChild(statusText);
-          const subText = document.createElement('div');
-          subText.id = 'ugc-tfl-sub';
-          subText.innerText = UGC_DEBUG ? (location.href + ' | ' + document.title) : 'Please wait.';
-          subText.style.cssText = 'color: #94a3b8; font-size: 12px; font-family: monospace; word-break: break-all;';
-          overlay.appendChild(subText);
-          document.body.appendChild(overlay);
-
-          const shieldCss = document.createElement('style');
-          shieldCss.textContent = '.g-recaptcha, iframe[src*="recaptcha"] { position: relative !important; z-index: 2147483641 !important; }';
-          document.head.appendChild(shieldCss);
-
-          // Keep the branded overlay ALWAYS visible. Never remove it: expose ONLY
-          // the captcha widget by punching a click-hole around it and blocking
-          // clicks on the raw website behind the overlay.
-          window.ugcShieldCaptcha = function() {
-            try {
-              const captchaEl = document.querySelector('iframe[src*="recaptcha/api2/bframe"]') ||
-                                document.querySelector('.g-recaptcha') ||
-                                document.querySelector('iframe[src*="recaptcha"]');
-              const overlayEl = document.getElementById('ugc-tfl-overlay') || document.getElementById('ugc-clean-overlay');
-              if (!captchaEl || (captchaEl.offsetWidth === 0 && captchaEl.offsetHeight === 0)) return;
-              if (overlayEl) overlayEl.style.pointerEvents = 'none';
-              const r = captchaEl.getBoundingClientRect();
-              const pad = 8;
-              const x1 = Math.max(0, r.left - pad);
-              const y1 = Math.max(0, r.top - pad);
-              const x2 = Math.min(window.innerWidth, r.right + pad);
-              const y2 = Math.min(window.innerHeight, r.bottom + pad);
-              const W = window.innerWidth, H = window.innerHeight;
-              let wrap = document.getElementById('ugc-shield-strips');
-              if (!wrap) {
-                wrap = document.createElement('div');
-                wrap.id = 'ugc-shield-strips';
-                wrap.style.cssText = 'position: fixed; inset: 0; z-index: 2147483640; pointer-events: none;';
-                document.body.appendChild(wrap);
-              }
-              wrap.innerHTML = '';
-              const mk = (top, left, w, h) => {
-                if (w <= 0 || h <= 0) return;
-                const d = document.createElement('div');
-                d.style.cssText = 'position: fixed; top:' + top + 'px; left:' + left + 'px; width:' + w + 'px; height:' + h + 'px; background: transparent; pointer-events: auto;';
-                wrap.appendChild(d);
-              };
-              mk(0, 0, W, y1);
-              mk(y2, 0, W, H - y2);
-              mk(y1, 0, x1, y2 - y1);
-              mk(y1, x2, W - x2, y2 - y1);
-            } catch (e) { /* ignore */ }
-          };
-        })();
+        ${buildTflThemeScript(partIndex, totalParts, gameData && gameData.title)}
 
         // Register the auto-clicker here too: dom-ready fires before
         // did-finish-load, and executeJavaScript can be dropped silently if a
@@ -577,6 +591,7 @@ function downloadTflPart(part, gameData, partIndex, totalParts) {
 
     tflWindow.webContents.on('did-finish-load', () => {
       tflWindow.webContents.executeJavaScript(`
+        ${buildTflThemeScript(partIndex, totalParts, gameData && gameData.title)}
         ${tflAutoClickScript}
       `).catch(() => {});
     });
@@ -1057,12 +1072,24 @@ function replayApunKaGamesPart(flow, gameUrl, gameData, partIndex, totalParts) {
           };
         })();
 
+        // On TheFilesLocker the app's own signature screen takes over the
+        // replay window too (countdown + captcha + download button), exactly
+        // like the dedicated TFL window.
+        if (location.hostname.indexOf('thefileslocker') !== -1) {
+          ${buildTflThemeScript(partIndex, totalParts, gameData && gameData.title)}
+        }
+
         ${tflAutoClickScript}
       `).catch(() => {});
     });
 
     win.webContents.on('did-finish-load', () => {
       win.webContents.executeJavaScript(ugcReplayHelpers).catch(() => {});
+      win.webContents.executeJavaScript(`
+        if (location.hostname.indexOf('thefileslocker') !== -1) {
+          ${buildTflThemeScript(partIndex, totalParts, gameData && gameData.title)}
+        }
+      `).catch(() => {});
       win.webContents.executeJavaScript(tflAutoClickScript).catch(() => {});
     });
 

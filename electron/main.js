@@ -264,20 +264,39 @@ ipcMain.handle('ping', () => 'pong');
  */
 async function handleApunKaGamesDownload(gameUrl, gameData) {
   try {
+    // One-time flow recording: the FIRST ApunKaGames download opens a visible
+    // window where the user clicks through the real site once. The recorded
+    // steps are saved and replayed automatically for every ApunKaGames game
+    // afterwards. The recording UI is removed once the flow is saved
+    // (delete userData/apunkagames-flow.json to re-record).
+    let flow = loadRecordedFlow();
+    if (!flow) {
+      flow = await recordApunKaGamesFlow(gameUrl, gameData);
+      if (!flow || !Array.isArray(flow.steps) || !flow.steps.length) {
+        return { error: 'ApunKaGames recording was cancelled before any clicks were captured. Start the download again to retry.' };
+      }
+      saveRecordedFlow(flow);
+    }
+
+    const result = await replayApunKaGamesFlow(flow, gameUrl, gameData);
+    if (!result.error) return result;
+
+    // Fallback: the server-side provider for games the replay could not handle.
+    console.warn('ApunKaGames replay failed, falling back to provider:', result.error);
     const info = await getApunKaGamesDownload(gameUrl);
 
     if (info.error || !info.parts || !info.parts.length) {
-      return { error: info.error || 'No download parts found.' };
+      return { error: info.error || 'No download parts found (replay and provider both failed).' };
     }
 
-    const totalParts = info.parts.length;
     const ids = [];
+    const totalParts = info.parts.length;
 
     for (let i = 0; i < totalParts; i++) {
       const part = info.parts[i];
       const partTitle = `${gameData.title || part.title} (Part ${i + 1} of ${totalParts})`;
 
-      const result = await downloadTflPart(
+      const partResult = await downloadTflPart(
         part,
         {
           ...gameData,
@@ -289,14 +308,14 @@ async function handleApunKaGamesDownload(gameUrl, gameData) {
         totalParts
       );
 
-      if (result.error) {
+      if (partResult.error) {
         return {
-          error: result.error,
+          error: partResult.error,
           partsCompleted: ids.length,
           totalParts
         };
       }
-      ids.push(result.id);
+      ids.push(partResult.id);
     }
 
     return { success: true, ids, count: ids.length };
@@ -635,6 +654,550 @@ function downloadTflPart(part, gameData, partIndex, totalParts) {
     });
   });
 }
+
+// ---------------------------------------------------------------
+// ApunKaGames one-time flow recorder + replayer
+// ---------------------------------------------------------------
+// The FIRST ApunKaGames download opens a visible window where the user clicks
+// through the real site flow once (shortener chooser, vlink hops, part pages,
+// up to TheFilesLocker). Those clicks are recorded as robust selectors + the
+// resulting URLs, saved to userData/apunkagames-flow.json, and the recording
+// UI is removed. Every later ApunKaGames game then replays the recorded flow
+// automatically in a hidden window; if the replay cannot find the elements,
+// it falls back to the server-side provider (getApunKaGamesDownload).
+
+function apunkaFlowPath() {
+  return path.join(app.getPath('userData'), 'apunkagames-flow.json');
+}
+
+function loadRecordedFlow() {
+  try {
+    const raw = fs.readFileSync(apunkaFlowPath(), 'utf8');
+    const flow = JSON.parse(raw);
+    if (flow && Array.isArray(flow.steps) && flow.steps.length) return flow;
+  } catch (e) { /* no flow recorded yet */ }
+  return null;
+}
+
+function saveRecordedFlow(flow) {
+  try {
+    fs.mkdirSync(path.dirname(apunkaFlowPath()), { recursive: true });
+    fs.writeFileSync(apunkaFlowPath(), JSON.stringify(flow, null, 2), 'utf8');
+    return true;
+  } catch (e) {
+    console.error('Failed to save ApunKaGames flow:', e.message);
+    return false;
+  }
+}
+
+// Shared page-side helpers: selector building, element finding, text matching.
+const ugcReplayHelpers = `
+function ugcEsc(v) { return String(v).replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"'); }
+function buildSelectors(el) {
+  const sels = [];
+  try { if (el.id) sels.push('#' + CSS.escape(el.id)); } catch (e) {}
+  const href = el.getAttribute && el.getAttribute('href');
+  if (href) sels.push('a[href="' + ugcEsc(href) + '"]');
+  const action = el.getAttribute && el.getAttribute('action');
+  if (action) sels.push('form[action="' + ugcEsc(action) + '"]');
+  const cls = Array.from(el.classList || []).filter(function (c) { return /download|host|proceed|primary|dlink|gip|btn/i.test(c); }).slice(0, 3).join('.');
+  if (cls) sels.push(el.tagName.toLowerCase() + '.' + cls);
+  const text = (el.innerText || el.textContent || el.value || '').replace(/\\s+/g, ' ').trim();
+  if (text && text.length <= 80) sels.push('text:' + text);
+  sels.push(el.tagName.toLowerCase());
+  return sels;
+}
+function buildRec(el) {
+  const sels = buildSelectors(el);
+  if (!sels.length) return null;
+  return { type: 'click', selectors: sels.slice(0, 6), url: (el.getAttribute('href') || el.getAttribute('action') || '') };
+}
+function findEls(sel) {
+  if (sel.indexOf('text:') === 0) {
+    const needle = sel.slice(5).toLowerCase();
+    const out = [];
+    try {
+      document.querySelectorAll('a, button, input[type="submit"], input[type="button"]').forEach(function (el) {
+        const t = (el.innerText || el.textContent || el.value || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+        if (t.indexOf(needle) !== -1) out.push(el);
+      });
+    } catch (e) {}
+    return out;
+  }
+  try { return Array.prototype.slice.call(document.querySelectorAll(sel)); } catch (e) { return []; }
+}
+`;
+
+// Recorder UI + click catcher (injected into the visible recording window).
+const ugcRecorderScript = `
+(function () {
+  if (document.getElementById('ugc-rec-panel')) return;
+  window.__ugcRecStop = false;
+  window.__ugcRecQueue = [];
+  try {
+    const saved = sessionStorage.getItem('ugcRecQueue');
+    if (saved) { window.__ugcRecQueue = JSON.parse(saved); sessionStorage.removeItem('ugcRecQueue'); }
+  } catch (e) {}
+  const panel = document.createElement('div');
+  panel.id = 'ugc-rec-panel';
+  panel.style.cssText = 'position: fixed; top: 12px; right: 12px; z-index: 2147483647; background: #7f1d1d; color: #fff; padding: 12px 16px; border-radius: 10px; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.5; box-shadow: 0 6px 24px rgba(0,0,0,.55); max-width: 300px;';
+  panel.innerHTML = '<div style="font-weight: bold; font-size: 14px; margin-bottom: 6px;">🎬 REC — ApunKaGames flow recorder</div>' +
+    '<div style="opacity: .92; margin-bottom: 10px;">Perform your download clicks once. Recording stops automatically when TheFilesLocker loads, or press Stop &amp; Save.</div>' +
+    '<button id="ugc-rec-stop-btn" style="background:#ef4444; color:#fff; border:0; border-radius:6px; padding:6px 12px; font-weight:bold; cursor:pointer;">■ Stop &amp; Save</button>';
+  document.body.appendChild(panel);
+  document.getElementById('ugc-rec-stop-btn').addEventListener('click', function () { window.__ugcRecStop = true; });
+  document.addEventListener('click', function (e) {
+    const el = e.target && e.target.closest ? e.target.closest('a, button, input[type="submit"], input[type="button"], input[type="image"], [role="button"]') : e.target;
+    if (!el || el.id === 'ugc-rec-stop-btn') return;
+    const rec = buildRec(el);
+    if (!rec) return;
+    const form = el.closest('form');
+    if (form && form.target === '_blank' && /download-process\\.php/i.test(form.getAttribute('action') || '')) {
+      e.preventDefault();
+      e.stopPropagation();
+      const file = form.querySelector('input[name="file"]');
+      const go = (file && file.value) || form.getAttribute('action');
+      if (go) {
+        let saved = [];
+        try { saved = JSON.parse(sessionStorage.getItem('ugcRecQueue') || '[]'); } catch (err) {}
+        saved.push(rec);
+        try { sessionStorage.setItem('ugcRecQueue', JSON.stringify(saved)); } catch (err) {}
+        setTimeout(function () { window.location.href = go; }, 250);
+      }
+      return;
+    }
+    window.__ugcRecQueue.push(rec);
+  }, true);
+})();
+`;
+
+// Opens a visible window on the game page and records every user click until
+// TheFilesLocker is reached (or the user presses Stop). Returns the flow.
+function recordApunKaGamesFlow(gameUrl, gameData) {
+  return new Promise((resolve) => {
+    const steps = [];
+    let lastUrl = '';
+    let stepStart = Date.now();
+    let finalized = false;
+    let pollTimer = null;
+
+    const recWindow = new BrowserWindow({
+      width: 1100,
+      height: 800,
+      title: 'UGC REC - ApunKaGames (click through once)',
+      show: true,
+      backgroundColor: '#0f172a',
+      webPreferences: { nodeIntegration: false, contextIsolation: true }
+    });
+    recWindow.setMenu(null);
+
+    // Keep every hop in the same window (target=_blank forms and links).
+    recWindow.webContents.setWindowOpenHandler(({ url }) => {
+      try {
+        if (url && /^https?:/i.test(url)) recWindow.loadURL(url);
+      } catch (e) {}
+      return { action: 'deny' };
+    });
+
+    recWindow.on('page-title-updated', (e, title) => {
+      e.preventDefault();
+      recWindow.setTitle('UGC REC [ApunKaGames]: ' + title);
+    });
+
+    const finish = (flow) => {
+      if (finalized) return;
+      finalized = true;
+      if (pollTimer) clearInterval(pollTimer);
+      try { if (!recWindow.isDestroyed()) recWindow.destroy(); } catch (e) {}
+      resolve(flow);
+    };
+
+    recWindow.on('closed', () => { finish(null); });
+
+    pollTimer = setInterval(async () => {
+      if (recWindow.isDestroyed()) { finish(null); return; }
+      try {
+        const url = recWindow.webContents.getURL();
+        const newSteps = await recWindow.webContents.executeJavaScript('(window.__ugcRecQueue || []).splice(0)', true).catch(() => []);
+        const stopFlag = await recWindow.webContents.executeJavaScript('!!window.__ugcRecStop', true).catch(() => false);
+        if (Array.isArray(newSteps) && newSteps.length) {
+          const now = Date.now();
+          for (const s of newSteps) {
+            s.waitMs = Math.max(0, now - stepStart);
+            steps.push(s);
+          }
+          stepStart = now;
+        }
+        if (url && url !== lastUrl) {
+          const last = steps[steps.length - 1];
+          if (last && last.type === 'click' && !last.navUrl) last.navUrl = url;
+          lastUrl = url;
+          stepStart = Date.now();
+        }
+        let host = '';
+        try { host = url ? new URL(url).hostname : ''; } catch (e) {}
+        if (stopFlag || (host && host.includes('thefileslocker'))) {
+          if (!steps.length) { finish(null); return; }
+          finish({
+            version: 1,
+            recordedAt: new Date().toISOString(),
+            gameTitle: (gameData && gameData.title) || '',
+            steps
+          });
+          return;
+        }
+      } catch (e) { /* window destroyed */ }
+    }, 400);
+
+    recWindow.webContents.on('did-finish-load', () => {
+      recWindow.webContents.executeJavaScript(ugcReplayHelpers + ugcRecorderScript).catch(() => {});
+    });
+
+    recWindow.loadURL(gameUrl).catch((e) => {
+      console.warn('ApunKaGames recording load failed:', e.message);
+      finish(null);
+    });
+  });
+}
+
+// ---- Replay engine ----
+
+function ugcSleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+async function waitForSelector(win, selectors, matchIdx, timeoutMs) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (win.isDestroyed()) return false;
+    try {
+      const found = await win.webContents.executeJavaScript(`(function () {
+        const sels = ${JSON.stringify(selectors)};
+        const idx = ${matchIdx};
+        for (const sel of sels) {
+          const els = findEls(sel);
+          if (idx < els.length) {
+            const el = els[idx];
+            const r = el.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) return true;
+          }
+        }
+        return false;
+      })()`);
+      if (found) return true;
+    } catch (e) {}
+    await ugcSleep(350);
+  }
+  return false;
+}
+
+async function clickFound(win, step, matchIdx) {
+  try {
+    await win.webContents.executeJavaScript(`(function () {
+      const sels = ${JSON.stringify(step.selectors)};
+      const idx = ${matchIdx};
+      let el = null;
+      for (const sel of sels) {
+        const els = findEls(sel);
+        if (idx < els.length) { el = els[idx]; break; }
+      }
+      if (!el) return;
+      try { el.scrollIntoView({ block: 'center' }); } catch (e) {}
+      if (el.tagName === 'A' && el.href) { window.location.href = el.href; return; }
+      const form = el.closest('form');
+      if (form && /download-process\\.php/i.test(form.getAttribute('action') || '')) {
+        const file = form.querySelector('input[name="file"]');
+        if (file && file.value) { window.location.href = file.value; return; }
+      }
+      if (form) { form.submit(); return; }
+      el.click();
+    })()`);
+  } catch (e) {}
+}
+
+// Replays recorded steps until the page reaches TheFilesLocker (where the
+// tflAutoClickScript takes over) or all steps are consumed.
+function replayChain(win, flow, partIndex) {
+  return new Promise((resolve) => {
+    const steps = flow.steps || [];
+    if (!steps.length) { resolve('done'); return; }
+    let idx = 0;
+    let done = false;
+    let navTimer = null;
+
+    const finish = (r) => {
+      if (done) return;
+      done = true;
+      if (navTimer) clearTimeout(navTimer);
+      win.webContents.removeListener('did-finish-load', onLoad);
+      resolve(r);
+    };
+
+    const runStep = async () => {
+      if (done) return;
+      if (idx >= steps.length) { finish('done'); return; }
+      const step = steps[idx];
+      const matchIdx = idx === 0 ? (partIndex - 1) : 0;
+      const found = await waitForSelector(win, step.selectors, matchIdx, 15000);
+      if (done) return;
+      if (!found) {
+        // Fallback: navigate directly to the recorded URL (skip step 0, which
+        // is game-specific).
+        if (idx > 0 && step.url && /^https?:/i.test(step.url)) {
+          idx++;
+          try { await win.loadURL(step.url); } catch (e) { finish('error'); }
+        } else {
+          finish('error');
+        }
+        return;
+      }
+      await clickFound(win, step, matchIdx);
+      if (done) return;
+      idx++;
+      // If the click does not trigger navigation, continue after a grace period.
+      navTimer = setTimeout(() => {
+        navTimer = null;
+        if (!done) runStep();
+      }, 18000);
+    };
+
+    const onLoad = () => {
+      if (done) return;
+      if (navTimer) { clearTimeout(navTimer); navTimer = null; }
+      const url = win.webContents.getURL();
+      let host = '';
+      try { host = url ? new URL(url).hostname : ''; } catch (e) {}
+      if (host.includes('thefileslocker')) { finish('tfl'); return; }
+      if (idx >= steps.length) { finish('done'); return; }
+      runStep();
+    };
+
+    win.webContents.on('did-finish-load', onLoad);
+    onLoad();
+  });
+}
+
+function replayApunKaGamesPart(flow, gameUrl, gameData, partIndex, totalParts) {
+  return new Promise((resolve) => {
+    const win = new BrowserWindow({
+      width: UGC_DEBUG ? 1000 : 680,
+      height: UGC_DEBUG ? 750 : 600,
+      title: 'Universal Freebie',
+      show: UGC_DEBUG,
+      backgroundColor: '#0f172a',
+      webPreferences: { nodeIntegration: false, contextIsolation: true }
+    });
+    win.setMenu(null);
+    let partDone = false;
+    let matchCount = 1;
+
+    win.on('page-title-updated', (e, title) => {
+      e.preventDefault();
+      if (UGC_DEBUG) win.setTitle('UGC-REPLAY [ApunKaGames]: ' + title);
+      if (title === 'SHOW_ME') win.show();
+      if (title === 'HIDE_ME') win.hide();
+    });
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+    // Dark overlay while hidden + captcha shield (same pattern as TFL window).
+    win.webContents.on('dom-ready', () => {
+      win.webContents.executeJavaScript(`
+        (function () {
+          if (document.getElementById('ugc-replay-overlay')) return;
+          const overlay = document.createElement('div');
+          overlay.id = 'ugc-replay-overlay';
+          overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #0f172a; z-index: 2147483640; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: sans-serif;';
+          const titleNode = document.createElement('h2');
+          titleNode.innerText = 'Universal Freebie';
+          titleNode.style.cssText = 'color: #fff; margin-bottom: 20px; font-size: 24px; font-weight: bold; background: linear-gradient(135deg, #f97316 0%, #eab308 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;';
+          overlay.appendChild(titleNode);
+          const partText = document.createElement('div');
+          partText.innerText = 'Part ${partIndex} of ${totalParts} (ApunKaGames)';
+          partText.style.cssText = 'color: #94a3b8; font-size: 14px; margin-bottom: 10px;';
+          overlay.appendChild(partText);
+          const statusText = document.createElement('div');
+          statusText.id = 'ugc-replay-status';
+          statusText.innerText = 'Replaying recorded flow...';
+          statusText.style.cssText = 'color: #22c55e; font-size: 20px; font-weight: bold; margin-bottom: 10px;';
+          overlay.appendChild(statusText);
+          document.body.appendChild(overlay);
+
+          window.ugcShieldCaptcha = function () {
+            try {
+              const captchaEl = document.querySelector('iframe[src*="recaptcha/api2/bframe"]') ||
+                                document.querySelector('.g-recaptcha') ||
+                                document.querySelector('iframe[src*="recaptcha"]');
+              const overlayEl = document.getElementById('ugc-replay-overlay') || document.getElementById('ugc-clean-overlay');
+              if (!captchaEl || (captchaEl.offsetWidth === 0 && captchaEl.offsetHeight === 0)) return;
+              if (overlayEl) overlayEl.style.pointerEvents = 'none';
+              const r = captchaEl.getBoundingClientRect();
+              const pad = 8;
+              const x1 = Math.max(0, r.left - pad);
+              const y1 = Math.max(0, r.top - pad);
+              const x2 = Math.min(window.innerWidth, r.right + pad);
+              const y2 = Math.min(window.innerHeight, r.bottom + pad);
+              const W = window.innerWidth, H = window.innerHeight;
+              let wrap = document.getElementById('ugc-shield-strips');
+              if (!wrap) {
+                wrap = document.createElement('div');
+                wrap.id = 'ugc-shield-strips';
+                wrap.style.cssText = 'position: fixed; inset: 0; z-index: 2147483640; pointer-events: none;';
+                document.body.appendChild(wrap);
+              }
+              wrap.innerHTML = '';
+              const mk = (top, left, w, h) => {
+                if (w <= 0 || h <= 0) return;
+                const d = document.createElement('div');
+                d.style.cssText = 'position: fixed; top:' + top + 'px; left:' + left + 'px; width:' + w + 'px; height:' + h + 'px; background: transparent; pointer-events: auto;';
+                wrap.appendChild(d);
+              };
+              mk(0, 0, W, y1);
+              mk(y2, 0, W, H - y2);
+              mk(y1, 0, x1, y2 - y1);
+              mk(y1, x2, W - x2, y2 - y1);
+            } catch (e) {}
+          };
+        })();
+
+        ${tflAutoClickScript}
+      `).catch(() => {});
+    });
+
+    win.webContents.on('did-finish-load', () => {
+      win.webContents.executeJavaScript(ugcReplayHelpers).catch(() => {});
+      win.webContents.executeJavaScript(tflAutoClickScript).catch(() => {});
+    });
+
+    // Start replaying on the first successful load, and count how many part
+    // links exist on the game page (multi-part games replay each one).
+    win.webContents.once('did-finish-load', async () => {
+      const step0 = (flow.steps || [])[0];
+      if (step0 && Array.isArray(step0.selectors) && step0.selectors.length) {
+        try {
+          const count = await win.webContents.executeJavaScript(`(function () {
+            try {
+              const sels = ${JSON.stringify(step0.selectors)};
+              let max = 0;
+              for (const sel of sels) {
+                let els = [];
+                if (sel.indexOf('text:') === 0) {
+                  const needle = sel.slice(5).toLowerCase();
+                  document.querySelectorAll('a, button').forEach(function (el) {
+                    const t = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+                    if (t.indexOf(needle) !== -1) els.push(el);
+                  });
+                } else {
+                  els = Array.prototype.slice.call(document.querySelectorAll(sel));
+                }
+                if (els.length > max) max = els.length;
+              }
+              return max;
+            } catch (e) { return 1; }
+          })()`);
+          matchCount = Math.min(Math.max(1, parseInt(count, 10) || 1), 8);
+        } catch (e) {}
+      }
+      replayChain(win, flow, partIndex).then((res) => {
+        if (res === 'error') {
+          if (!win.isDestroyed()) win.close();
+        }
+        // 'tfl' / 'done': the tflAutoClickScript handles TheFilesLocker now.
+      });
+    });
+
+    const session = win.webContents.session;
+
+    const downloadHandler = async (e, item, webContents) => {
+      const finalUrl = item.getURL();
+      const finalFilename = item.getFilename();
+      const lowerFilename = finalFilename.toLowerCase();
+
+      const isValidGameArchive = lowerFilename.endsWith('.zip') || lowerFilename.endsWith('.rar') || lowerFilename.endsWith('.7z') || lowerFilename.endsWith('.iso') || lowerFilename.endsWith('.exe') || /\.part\d+\./i.test(lowerFilename) || lowerFilename.endsWith('.001');
+
+      if (!isValidGameArchive) {
+        console.warn('Blocked non-archive payload:', finalFilename);
+        item.cancel();
+        return;
+      }
+
+      e.preventDefault();
+
+      let userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+      let refererUrl = '';
+      try {
+        userAgent = win.webContents.getUserAgent();
+        refererUrl = webContents.getURL();
+      } catch (err) { /* window closed */ }
+
+      const cookies = await session.cookies.get({ url: finalUrl });
+      const cookieString = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+
+      partDone = true;
+      session.removeListener('will-download', downloadHandler);
+      if (!win.isDestroyed()) win.close();
+
+      if (globalDownloader) {
+        const meta = {
+          ...gameData,
+          customHeaders: {
+            'Cookie': cookieString,
+            'User-Agent': userAgent,
+            'Referer': refererUrl
+          }
+        };
+        const id = globalDownloader.startHttpDownload(finalUrl, finalFilename, meta);
+        resolve({ success: true, id, matchCount });
+      } else {
+        resolve({ error: 'Downloader not initialized' });
+      }
+    };
+
+    session.on('will-download', downloadHandler);
+
+    const replayTimeout = setTimeout(() => {
+      if (!win.isDestroyed()) win.close();
+    }, 240000);
+
+    win.on('closed', () => {
+      clearTimeout(replayTimeout);
+      if (!partDone) {
+        session.removeListener('will-download', downloadHandler);
+        resolve({ error: 'Window closed before download started (timeout or manual close).' });
+      }
+    });
+
+    win.loadURL(gameUrl).catch((err) => {
+      console.warn('Replay window load failed:', err.message);
+      if (!win.isDestroyed()) win.close();
+    });
+  });
+}
+
+async function replayApunKaGamesFlow(flow, gameUrl, gameData) {
+  const ids = [];
+  const first = await replayApunKaGamesPart(flow, gameUrl, gameData, 1, 1);
+  if (first.error) {
+    return { error: first.error, partsCompleted: 0, totalParts: 1 };
+  }
+  ids.push(first.id);
+  const totalParts = Math.min(first.matchCount || 1, 8);
+  for (let i = 2; i <= totalParts; i++) {
+    const r = await replayApunKaGamesPart(flow, gameUrl, gameData, i, totalParts);
+    if (r.error) {
+      return { error: r.error, partsCompleted: ids.length, totalParts };
+    }
+    ids.push(r.id);
+  }
+  return { success: true, ids, count: ids.length };
+}
+
+// Lets the user re-record the flow (deletes the saved flow file).
+ipcMain.handle('reset-apunkagames-flow', () => {
+  try {
+    if (fs.existsSync(apunkaFlowPath())) fs.unlinkSync(apunkaFlowPath());
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
 
 // Download IPC
 ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {

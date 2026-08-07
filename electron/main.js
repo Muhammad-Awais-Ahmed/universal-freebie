@@ -5,7 +5,7 @@ const { spawn } = require('child_process');
 const serve = require('electron-serve');
 const serveApp = serve.default || serve;
 
-const { searchArchiveOrg, getArchiveOrgDownload } = require('../src/backend/providers/archiveOrg');
+const { searchArchiveOrg, getArchiveOrgFiles } = require('../src/backend/providers/archiveOrg');
 const { searchFitGirl, getFitGirlDownload } = require('../src/backend/providers/fitGirl');
 const { searchSteamUnlocked, getSteamUnlockedDownload } = require('../src/backend/providers/steamUnlocked');
 const { searchApunKaGames, getApunKaGamesDownload } = require('../src/backend/providers/apunKaGames');
@@ -1263,7 +1263,8 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
   let downloadInfo = null;
 
   if (source === 'Archive.org') {
-    // gameOrUrl might be a URL or just an identifier string
+    // Correct Archive.org flow: resolve EVERY game payload file (all disc
+    // images, all split/part archives, installers) and download them all.
     let identifier = gameData.id;
     try {
       const parsed = new URL(gameOrUrl);
@@ -1274,7 +1275,28 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
       // gameOrUrl is not a URL, use it as identifier
       identifier = gameOrUrl || gameData.id;
     }
-    downloadInfo = await getArchiveOrgDownload(identifier);
+    const archiveInfo = await getArchiveOrgFiles(identifier);
+
+    if (archiveInfo.error || !archiveInfo.files || !archiveInfo.files.length) {
+      return { error: archiveInfo.error || 'No downloadable game files found on this Archive.org item.' };
+    }
+
+    const ids = [];
+    const totalFiles = archiveInfo.files.length;
+    for (let i = 0; i < totalFiles; i++) {
+      const file = archiveInfo.files[i];
+      const id = globalDownloader.startHttpDownload(file.url, file.filename, {
+        ...gameData,
+        totalSize: archiveInfo.totalSize,
+        part: i + 1,
+        totalParts: totalFiles,
+        customHeaders: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+      ids.push(id);
+    }
+    return { success: true, ids, count: ids.length };
   } else if (source === 'FitGirl') {
     downloadInfo = await getFitGirlDownload(gameOrUrl);
   } else if (source === 'SteamUnlocked') {

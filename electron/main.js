@@ -12,6 +12,7 @@ const { searchApunKaGames, getApunKaGamesDownload } = require('../src/backend/pr
 const { searchFileCR } = require('../src/backend/providers/fileCR');
 const Downloader = require('../src/backend/downloader');
 const db = require('../src/backend/database');
+const proxyPool = require('../src/backend/proxyPool');
 
 let globalDownloader = null;
 
@@ -247,6 +248,14 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', function () {
   if (process.platform !== 'darwin') app.quit();
+});
+
+// Gracefully cancel all downloads and destroy the torrent client before
+// quitting so the app never hangs in a "Not Responding" state.
+app.on('before-quit', () => {
+  if (globalDownloader && typeof globalDownloader.shutdown === 'function') {
+    globalDownloader.shutdown();
+  }
 });
 
 ipcMain.handle('ping', () => 'pong');
@@ -1867,7 +1876,22 @@ ipcMain.handle('save-settings', (event, newSettings) => {
       fs.mkdirSync(globalDownloader.downloadsDir, { recursive: true });
     }
   }
+  // When the proxy pool is turned on (or changed), refresh it in the
+  // background so downloads can immediately use faster parallel peers.
+  if (newSettings && typeof newSettings.proxyPoolEnabled === 'boolean') {
+    proxyPool.refreshProxyPool().catch((err) => {
+      console.warn('Proxy pool refresh failed:', err.message);
+    });
+  }
   return updated;
+});
+
+// Proxy pool IPC
+ipcMain.handle('get-proxy-status', () => proxyPool.getStatus());
+
+ipcMain.handle('refresh-proxy-pool', async () => {
+  const result = await proxyPool.refreshProxyPool();
+  return proxyPool.getStatus();
 });
 
 ipcMain.handle('get-download-dir', () => {

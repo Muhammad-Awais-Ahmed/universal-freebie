@@ -13,12 +13,25 @@ interface MonitorStatus {
   lastSentAt: string | null;
 }
 
+interface ProxyStatus {
+  enabled: boolean;
+  updating: boolean;
+  proxies: { host: string; port: number; latency: number }[];
+  lastUpdatedAt: number | null;
+  lastError: string | null;
+  totalCandidates: number;
+  tested: number;
+}
+
 export default function SettingsPage() {
   const [downloadDir, setDownloadDir] = useState("...");
-  const [maxConcurrent, setMaxConcurrent] = useState(3);
-  const [maxChunks, setMaxChunks] = useState(32);
+  const [maxConcurrent, setMaxConcurrent] = useState(50);
+  const [maxChunks, setMaxChunks] = useState(64);
   const [webtorrentTrackers, setWebtorrentTrackers] = useState("");
+  const [proxyPoolEnabled, setProxyPoolEnabled] = useState(false);
+  const [proxyStatus, setProxyStatus] = useState<ProxyStatus | null>(null);
   const [saving, setSaving] = useState(false);
+  const [refreshingProxies, setRefreshingProxies] = useState(false);
 
   // Monitoring state
   const [monitor, setMonitor] = useState<MonitorStatus | null>(null);
@@ -34,16 +47,19 @@ export default function SettingsPage() {
   const loadSettings = async () => {
     try {
       const { ipcRenderer } = (window as any).require("electron");
-      const [settings, m] = await Promise.all([
+      const [settings, m, proxy] = await Promise.all([
         ipcRenderer.invoke("get-settings"),
         ipcRenderer.invoke("get-monitor-status"),
+        ipcRenderer.invoke("get-proxy-status"),
       ]);
       if (settings) {
         setDownloadDir(settings.downloadDirectory || "...");
-        setMaxConcurrent(settings.maxConcurrent || 3);
-        setMaxChunks(settings.maxChunks || 32);
+        setMaxConcurrent(settings.maxConcurrent || 50);
+        setMaxChunks(settings.maxChunks || 64);
         setWebtorrentTrackers(settings.webtorrentTrackers || "");
+        setProxyPoolEnabled(!!settings.proxyPoolEnabled);
       }
+      if (proxy) setProxyStatus(proxy);
       if (m) {
         setMonitor(m);
         setMonServerUrl(m.serverUrl || "");
@@ -51,6 +67,19 @@ export default function SettingsPage() {
       }
     } catch (err) {
       console.error("Failed to load settings:", err);
+    }
+  };
+
+  const refreshProxyPool = async () => {
+    setRefreshingProxies(true);
+    try {
+      const { ipcRenderer } = (window as any).require("electron");
+      const status = await ipcRenderer.invoke("refresh-proxy-pool");
+      setProxyStatus(status);
+    } catch (err) {
+      console.error("Failed to refresh proxy pool:", err);
+    } finally {
+      setRefreshingProxies(false);
     }
   };
 
@@ -63,7 +92,10 @@ export default function SettingsPage() {
         maxConcurrent,
         maxChunks,
         webtorrentTrackers,
+        proxyPoolEnabled,
       });
+      const proxy = await ipcRenderer.invoke("get-proxy-status");
+      if (proxy) setProxyStatus(proxy);
     } catch (err) {
       console.error("Failed to save settings:", err);
     } finally {
@@ -168,7 +200,7 @@ export default function SettingsPage() {
             <input
               type="range"
               min="1"
-              max="10"
+              max="200"
               value={maxConcurrent}
               onChange={(e) => setMaxConcurrent(parseInt(e.target.value))}
               className={styles.slider}
@@ -181,12 +213,58 @@ export default function SettingsPage() {
             <input
               type="range"
               min="8"
-              max="64"
+              max="128"
               step="8"
               value={maxChunks}
               onChange={(e) => setMaxChunks(parseInt(e.target.value))}
               className={styles.slider}
             />
+          </div>
+        </div>
+
+        <div className={styles.section}>
+          <h2 className={styles.sectionTitle}>🌐 Proxy Pool (Parallel Peers)</h2>
+          <div className={styles.field}>
+            <label className={styles.label}>
+              <input
+                type="checkbox"
+                checked={proxyPoolEnabled}
+                onChange={(e) => setProxyPoolEnabled(e.target.checked)}
+                style={{ marginRight: 8, transform: "scale(1.3)" }}
+              />
+              Enable free proxy pool from GitHub
+            </label>
+            <p className={styles.monitorNote}>
+              Downloads free public proxies from GitHub lists, tests them, and routes
+              every chunk through the fastest working ones — acting as extra parallel
+              peers for much higher speed.
+            </p>
+          </div>
+          <div className={styles.field}>
+            <label className={styles.label}>Proxy Pool Status</label>
+            <div className={styles.inputRow}>
+              <input
+                type="text"
+                className={styles.input}
+                readOnly
+                value={
+                  proxyStatus?.updating
+                    ? "Testing proxies…"
+                    : proxyStatus && proxyStatus.proxies && proxyStatus.proxies.length > 0
+                    ? `${proxyStatus.proxies.length} working proxies (fastest: ${proxyStatus.proxies[0].host}:${proxyStatus.proxies[0].port}, ${proxyStatus.proxies[0].latency}ms)`
+                    : proxyStatus?.lastError
+                    ? `No proxies yet — ${proxyStatus.lastError}`
+                    : "No proxies loaded yet"
+                }
+              />
+              <button
+                className={styles.browseBtn}
+                onClick={refreshProxyPool}
+                disabled={refreshingProxies || !proxyPoolEnabled}
+              >
+                {refreshingProxies ? "Testing…" : "Refresh Pool"}
+              </button>
+            </div>
           </div>
         </div>
 

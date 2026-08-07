@@ -4,8 +4,10 @@ const path = require('path');
 const { app } = require('electron');
 const db = require('./database');
 const WebTorrent = require('webtorrent');
+const proxyPool = require('./proxyPool');
 
 const MAX_CHUNK_RETRIES = 5;
+const MAX_REPAIR_PASSES = 2;
 const COMPLETED_AUTO_REMOVE_MS = 30_000;
 const SPEED_SAMPLE_INTERVAL_MS = 1000;
 
@@ -34,8 +36,11 @@ class Downloader {
   _getSettings() {
     const s = db.getSettings();
     return {
-      maxChunks: s.maxChunks || 32,
-      maxConcurrent: s.maxConcurrent || 3,
+      // Downloads now run fully in parallel by default (no queueing
+      // until far beyond realistic usage), with many chunks per file
+      // for maximum speed. Users can still tune both in Settings.
+      maxChunks: Math.min(parseInt(s.maxChunks, 10) || 64, 128),
+      maxConcurrent: Math.min(parseInt(s.maxConcurrent, 10) || 50, 200),
       webtorrentTrackers: s.webtorrentTrackers || ''
     };
   }
@@ -114,6 +119,11 @@ class Downloader {
       ...customHeaders
     };
 
+    // Abort controller + writer registry: lets cancel/quit stop this
+    // download instantly without blocking the main process.
+    downloadItem._abortController = new AbortController();
+    downloadItem._writers = new Set();
+
     try {
       let totalBytes = 0;
       let acceptRanges = false;
@@ -127,7 +137,8 @@ class Downloader {
         }
         const rangeRes = await axios.get(url, { 
           headers: rangeHeaders,
-          timeout: 8000 
+          timeout: 8000,
+          signal: downloadItem._abortController ? downloadItem._abortController.signal : undefined
         });
         
         if (rangeRes.status === 206) {
@@ -153,102 +164,175 @@ class Downloader {
       }
 
       const settings = this._getSettings();
-      const CHUNKS = settings.maxChunks;
-      const fd = fs.openSync(filePath, resumeFrom > 0 ? 'r+' : 'w');
+      const CHUNKS = Math.min(settings.maxChunks, 128);
       const chunkSize = Math.ceil(totalBytes / CHUNKS);
-      let totalDownloaded = resumeFrom || 0;
-      let lastTime = Date.now();
-      let lastBytes = totalDownloaded;
+      const chunkBytes = new Array(CHUNKS).fill(0);
 
-      const downloadChunk = (start, end, retryCount) => {
-        return new Promise(async (resolve) => {
+      // Preallocate the file asynchronously (sparse full-size file).
+      // Never blocks the UI — the old fs.writeSync approach froze the
+      // app into a "Not Responding" state during big downloads.
+      if (!resumeFrom) {
+        try {
+          const fh = await fs.promises.open(filePath, 'w');
+          await fh.truncate(totalBytes);
+          await fh.close();
+        } catch (err) {
+          console.warn('Failed to preallocate file, continuing anyway:', err.message);
+        }
+      }
+
+      let lastTime = Date.now();
+      let lastBytes = 0;
+
+      const updateProgress = () => {
+        const downloaded = Math.min(totalBytes, (resumeFrom || 0) + chunkBytes.reduce((a, b) => a + b, 0));
+        downloadItem.downloadedBytes = downloaded;
+        downloadItem.progress = (downloaded / totalBytes) * 100;
+        const now = Date.now();
+        const td = (now - lastTime) / SPEED_SAMPLE_INTERVAL_MS;
+        if (td >= 1) {
+          downloadItem.speed = (downloaded - lastBytes) / td;
+          lastBytes = downloaded;
+          lastTime = now;
+          this._emitProgress();
+        }
+      };
+
+      const downloadChunk = (start, end, chunkIndex, retryCount) => {
+        return new Promise((resolve) => {
+          let settled = false;
+          const finish = () => {
+            if (!settled) { settled = true; resolve(); }
+          };
           const attempt = async () => {
+            if (downloadItem.status === 'cancelled') return finish();
+            const proxy = proxyPool.hasProxies() ? proxyPool.getNextProxy() : null;
             try {
               const response = await axios({
                 url,
                 method: 'GET',
                 responseType: 'stream',
-                headers: { 
-                  ...baseHeaders,
-                  'Range': `bytes=${start}-${end}`
-                }
+                headers: { ...baseHeaders, 'Range': `bytes=${start}-${end}` },
+                proxy: proxy || undefined,
+                signal: downloadItem._abortController ? downloadItem._abortController.signal : undefined,
+                maxRedirects: 5
               });
+              if (downloadItem.status === 'cancelled') {
+                response.data.destroy();
+                return finish();
+              }
 
-              let currentPos = start;
+              let received = 0;
+              const writer = fs.createWriteStream(filePath, { flags: 'r+', start, highWaterMark: 1024 * 1024 * 4 });
+              if (downloadItem._writers) downloadItem._writers.add(writer);
 
               response.data.on('data', (chunk) => {
                 if (downloadItem.status === 'cancelled') {
                   response.data.destroy();
-                  return resolve();
+                  writer.destroy();
+                  return;
                 }
-
-                fs.writeSync(fd, chunk, 0, chunk.length, currentPos);
-                currentPos += chunk.length;
-                totalDownloaded += chunk.length;
-
-                downloadItem.downloadedBytes = totalDownloaded;
-                downloadItem.progress = (totalDownloaded / totalBytes) * 100;
-
-                const currentTime = Date.now();
-                const timeDiff = (currentTime - lastTime) / SPEED_SAMPLE_INTERVAL_MS;
-                if (timeDiff >= 1) {
-                  downloadItem.speed = (totalDownloaded - lastBytes) / timeDiff;
-                  lastBytes = totalDownloaded;
-                  lastTime = currentTime;
-                  this._emitProgress();
-                }
+                received += chunk.length;
+                chunkBytes[chunkIndex] = received;
+                updateProgress();
               });
 
-              response.data.on('end', resolve);
-              
-              response.data.on('error', (err) => {
-                if (downloadItem.status === 'cancelled') return resolve();
-                console.warn(`Chunk stream error, attempt ${retryCount + 1}/${MAX_CHUNK_RETRIES} for bytes ${start}-${end}:`, err.message);
+              response.data.pipe(writer);
+
+              const fail = (err) => {
+                if (downloadItem.status === 'cancelled') return finish();
+                if (proxy) proxyPool.markFailed(proxy.host, proxy.port);
+                if (downloadItem._writers) downloadItem._writers.delete(writer);
                 if (retryCount < MAX_CHUNK_RETRIES) {
-                  setTimeout(() => attempt(), 2000 * (retryCount + 1));
+                  console.warn(`Chunk retry ${retryCount + 1}/${MAX_CHUNK_RETRIES} for bytes ${start}-${end}:`, err ? err.message : 'incomplete');
+                  setTimeout(() => attempt(), 1500 * (retryCount + 1));
                 } else {
-                  resolve(); // Give up on this chunk, let completion check catch it
+                  finish(); // Repair pass will re-fetch this range
                 }
-              });
+              };
 
+              writer.on('finish', () => {
+                if (downloadItem._writers) downloadItem._writers.delete(writer);
+                if (received < (end - start + 1)) fail(new Error('incomplete chunk'));
+                else finish();
+              });
+              writer.on('error', fail);
+              response.data.on('error', fail);
+              response.data.on('aborted', () => fail(new Error('aborted')));
             } catch (err) {
-              if (downloadItem.status === 'cancelled') return resolve();
-              console.warn(`Chunk connection error, attempt ${retryCount + 1}/${MAX_CHUNK_RETRIES} for bytes ${start}-${end}:`, err.message);
+              if (downloadItem.status === 'cancelled') return finish();
+              if (proxy) proxyPool.markFailed(proxy.host, proxy.port);
               if (retryCount < MAX_CHUNK_RETRIES) {
-                setTimeout(() => attempt(), 2000 * (retryCount + 1));
+                console.warn(`Chunk retry ${retryCount + 1}/${MAX_CHUNK_RETRIES} for bytes ${start}-${end}:`, err.message);
+                setTimeout(() => attempt(), 1500 * (retryCount + 1));
               } else {
-                resolve();
+                finish();
               }
             }
           };
-          
           attempt();
         });
       };
 
-      const promises = [];
+      // Pass 1: download every chunk in parallel (proxy-assisted).
+      let promises = [];
       for (let i = 0; i < CHUNKS; i++) {
         const start = i * chunkSize;
         const end = i === CHUNKS - 1 ? totalBytes - 1 : (i + 1) * chunkSize - 1;
-        promises.push(downloadChunk(start, end, 0));
+        promises.push(downloadChunk(start, end, i, 0));
+      }
+      await Promise.all(promises);
+
+      // Repair passes: re-fetch any ranges still incomplete so a few
+      // flaky connections can never corrupt the final file.
+      for (let pass = 0; pass < MAX_REPAIR_PASSES; pass++) {
+        if (downloadItem.status === 'cancelled') break;
+        const missing = [];
+        for (let i = 0; i < CHUNKS; i++) {
+          const start = i * chunkSize;
+          const end = i === CHUNKS - 1 ? totalBytes - 1 : (i + 1) * chunkSize - 1;
+          if (chunkBytes[i] < (end - start + 1)) missing.push([start, end, i]);
+        }
+        if (!missing.length) break;
+        console.warn(`Repair pass ${pass + 1}: re-downloading ${missing.length} incomplete range(s).`);
+        await Promise.all(missing.map(([s, e, i]) => downloadChunk(s, e, i, 0)));
       }
 
-      await Promise.all(promises);
-      fs.closeSync(fd);
-
       if (downloadItem.status !== 'cancelled') {
-        downloadItem.status = 'completed';
-        downloadItem.progress = 100;
-        downloadItem.speed = 0;
-        db.addDownloadToHistory(downloadItem);
-        db.updateDownloadHistory(downloadItem.id, {
-          status: 'completed',
-          downloadedBytes: downloadItem.downloadedBytes || downloadItem.totalBytes,
-          totalBytes: downloadItem.totalBytes
-        });
-        this._emitProgress();
-        this._processQueue();
-        this._scheduleAutoRemove(id);
+        // Verify every byte made it to disk (some chunks may have given
+        // up even after repair passes) — never mark a corrupt file done.
+        let allBytesPresent = true;
+        for (let i = 0; i < CHUNKS; i++) {
+          const start = i * chunkSize;
+          const end = i === CHUNKS - 1 ? totalBytes - 1 : (i + 1) * chunkSize - 1;
+          if (chunkBytes[i] < (end - start + 1)) { allBytesPresent = false; break; }
+        }
+        if (!allBytesPresent) {
+          downloadItem.status = 'error';
+          downloadItem.error = 'Some chunks could not be downloaded after multiple retries. Resume to continue.';
+          downloadItem.speed = 0;
+          db.updateDownloadHistory(downloadItem.id, {
+            status: 'error',
+            downloadedBytes: downloadItem.downloadedBytes || 0,
+            totalBytes: downloadItem.totalBytes || 0,
+            error: downloadItem.error
+          });
+          this._emitProgress();
+          this._processQueue();
+        } else {
+          downloadItem.status = 'completed';
+          downloadItem.progress = 100;
+          downloadItem.speed = 0;
+          db.addDownloadToHistory(downloadItem);
+          db.updateDownloadHistory(downloadItem.id, {
+            status: 'completed',
+            downloadedBytes: downloadItem.downloadedBytes || downloadItem.totalBytes,
+            totalBytes: downloadItem.totalBytes
+          });
+          this._emitProgress();
+          this._processQueue();
+          this._scheduleAutoRemove(id);
+        }
       }
     } catch (err) {
       if (downloadItem && downloadItem.status !== 'cancelled') {
@@ -278,12 +362,21 @@ class Downloader {
       baseHeaders['Range'] = `bytes=${resumeFrom}-`;
     }
 
+    // Abort support for instant cancel/quit.
+    if (!downloadItem._abortController) downloadItem._abortController = new AbortController();
+    if (!downloadItem._writers) downloadItem._writers = new Set();
+
+    const proxy = proxyPool.hasProxies() ? proxyPool.getNextProxy() : null;
+
     try {
       const { data, headers, status } = await axios({
         url,
         method: 'GET',
         responseType: 'stream',
-        headers: baseHeaders
+        headers: baseHeaders,
+        proxy: proxy || undefined,
+        signal: downloadItem._abortController.signal,
+        maxRedirects: 5
       });
 
       const isResume = status === 206;
@@ -293,6 +386,7 @@ class Downloader {
       }
 
       const writer = fs.createWriteStream(filePath, { flags: isResume ? 'r+' : 'w', highWaterMark: 1024 * 1024 * 4 });
+      downloadItem._writers.add(writer);
       let downloadedBytes = resumeFrom || 0;
       let lastTime = Date.now();
       let lastBytes = downloadedBytes;
@@ -321,6 +415,7 @@ class Downloader {
       data.pipe(writer);
 
       data.on('end', () => {
+        if (downloadItem._writers) downloadItem._writers.delete(writer);
         if (downloadItem.status !== 'cancelled' && downloadItem.status !== 'error') {
           downloadItem.status = 'completed';
           downloadItem.progress = 100;
@@ -338,6 +433,7 @@ class Downloader {
       });
 
       data.on('error', (err) => {
+        if (downloadItem._writers) downloadItem._writers.delete(writer);
         if (downloadItem.status !== 'cancelled') {
           downloadItem.status = 'error';
           downloadItem.error = err.message;
@@ -354,6 +450,7 @@ class Downloader {
       });
 
       writer.on('error', (err) => {
+        if (downloadItem._writers) downloadItem._writers.delete(writer);
         if (downloadItem.status !== 'cancelled') {
           downloadItem.status = 'error';
           downloadItem.error = err.message;
@@ -495,6 +592,18 @@ class Downloader {
 
     item.status = 'cancelled';
 
+    // Abort any in-flight HTTP requests and close chunk writers so the
+    // download stops immediately without blocking the main process.
+    if (item._abortController) {
+      try { item._abortController.abort(); } catch (err) {}
+    }
+    if (item._writers) {
+      for (const w of item._writers) {
+        try { w.destroy(); } catch (err) {}
+      }
+      item._writers.clear();
+    }
+
     // Keep the partial file in history so the user can Continue it later.
     db.updateDownloadHistory(id, {
       status: 'interrupted',
@@ -590,6 +699,32 @@ class Downloader {
     }
     db.removeDownloadFromHistory(id);
     this._emitProgress();
+  }
+
+  /**
+   * Graceful shutdown for app quit: cancels every active download,
+   * aborts in-flight requests, closes file writers and destroys the
+   * torrent client so the process can exit cleanly (no lingering
+   * sockets, no frozen "Not Responding" window).
+   */
+  shutdown() {
+    for (const [, item] of this.downloads) {
+      if (item.status === 'downloading' || item.status === 'queued') {
+        this.cancelDownload(item.id);
+      } else if (item._abortController) {
+        try { item._abortController.abort(); } catch (err) {}
+      }
+      if (item._writers) {
+        for (const w of item._writers) {
+          try { w.destroy(); } catch (err) {}
+        }
+        item._writers.clear();
+      }
+    }
+    if (this.torrentClient) {
+      try { this.torrentClient.destroy(() => {}); } catch (err) {}
+      this.torrentClient = null;
+    }
   }
 
   _scheduleAutoRemove(id) {

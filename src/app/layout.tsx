@@ -29,7 +29,6 @@ export default function RootLayout({
             <nav className="flex items-center gap-4 no-drag">
               <NavLink href="/library">Library</NavLink>
               <NavLink href="/games">Download Games</NavLink>
-              <NavLink href="/mods">Download Mods</NavLink>
               <a
                 href="/settings"
                 className="text-sm font-medium text-slate-400 hover:text-white transition-colors ml-4"

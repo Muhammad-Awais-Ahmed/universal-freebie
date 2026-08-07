@@ -19,9 +19,6 @@ export default function HomePage() {
             <a href="/games" className={styles.primaryBtn}>
               Browse Games
             </a>
-            <a href="/mods" className={styles.secondaryBtn}>
-              Browse Mods
-            </a>
           </div>
           <div className={styles.stats}>
             <div className={styles.statItem}>
@@ -31,10 +28,6 @@ export default function HomePage() {
             <div className={styles.statItem}>
               <div className={styles.statNumber}>1000+</div>
               <div className={styles.statLabel}>Games</div>
-            </div>
-            <div className={styles.statItem}>
-              <div className={styles.statNumber}>50+</div>
-              <div className={styles.statLabel}>Mods</div>
             </div>
           </div>
         </div>

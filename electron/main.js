@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+﻿const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -10,8 +10,6 @@ const { searchFitGirl, getFitGirlDownload } = require('../src/backend/providers/
 const { searchSteamUnlocked, getSteamUnlockedDownload } = require('../src/backend/providers/steamUnlocked');
 const { searchApunKaGames, getApunKaGamesDownload } = require('../src/backend/providers/apunKaGames');
 const { searchFileCR } = require('../src/backend/providers/fileCR');
-const { searchModDB } = require('../src/backend/providers/moddb');
-const { searchTheMovieBox, getTheMovieBoxEpisodes, getTheMovieBoxVideoUrl, getTheMovieBoxDownload } = require('../src/backend/providers/theMovieBox');
 const Downloader = require('../src/backend/downloader');
 const db = require('../src/backend/database');
 
@@ -756,9 +754,9 @@ const ugcRecorderScript = `
   const panel = document.createElement('div');
   panel.id = 'ugc-rec-panel';
   panel.style.cssText = 'position: fixed; top: 12px; right: 12px; z-index: 2147483647; background: #7f1d1d; color: #fff; padding: 12px 16px; border-radius: 10px; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.5; box-shadow: 0 6px 24px rgba(0,0,0,.55); max-width: 300px;';
-  panel.innerHTML = '<div style="font-weight: bold; font-size: 14px; margin-bottom: 6px;">🎬 REC — ApunKaGames flow recorder</div>' +
+  panel.innerHTML = '<div style="font-weight: bold; font-size: 14px; margin-bottom: 6px;">ðŸŽ¬ REC â€” ApunKaGames flow recorder</div>' +
     '<div style="opacity: .92; margin-bottom: 10px;">Perform your download clicks once. Recording stops automatically when TheFilesLocker loads, or press Stop &amp; Save.</div>' +
-    '<button id="ugc-rec-stop-btn" style="background:#ef4444; color:#fff; border:0; border-radius:6px; padding:6px 12px; font-weight:bold; cursor:pointer;">■ Stop &amp; Save</button>';
+    '<button id="ugc-rec-stop-btn" style="background:#ef4444; color:#fff; border:0; border-radius:6px; padding:6px 12px; font-weight:bold; cursor:pointer;">â–  Stop &amp; Save</button>';
   document.body.appendChild(panel);
   document.getElementById('ugc-rec-stop-btn').addEventListener('click', function () { window.__ugcRecStop = true; });
   document.addEventListener('click', function (e) {
@@ -1301,34 +1299,9 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
     downloadInfo = await getFitGirlDownload(gameOrUrl);
   } else if (source === 'SteamUnlocked') {
     downloadInfo = await getSteamUnlockedDownload(gameOrUrl);
-  } else if (source === 'TheMovieBox') {
-    const startEpisode = gameData.startEpisode || 1;
-    const endEpisode = gameData.endEpisode || null;
-    const result = await getTheMovieBoxDownload(gameOrUrl, startEpisode, endEpisode);
-    
-    if (result.error) {
-      return { error: result.error };
-    }
-    
-    if (result.episodes && result.episodes.length > 0) {
-      const downloadIds = [];
-      for (const ep of result.episodes) {
-        const id = globalDownloader.startHttpDownload(ep.url, ep.filename, {
-          ...gameData,
-          customHeaders: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': ep.url
-          }
-        });
-        downloadIds.push(id);
-      }
-      return { success: true, ids: downloadIds, count: downloadIds.length };
-    }
-    
-    return { error: 'No downloadable episodes found' };
   } else if (source === 'ApunKaGames') {
     return await handleApunKaGamesDownload(gameOrUrl, gameData);
-  } else if (source === 'FileCR' || source === 'ModDB') {
+  } else if (source === 'FileCR') {
     return new Promise((resolve) => {
       const siteWindow = new BrowserWindow({
         width: UGC_DEBUG ? 1100 : 600,
@@ -2026,12 +1999,3 @@ ipcMain.handle('search-games', async (event, query, sources) => {
   }
 });
 
-// Mods Search IPC
-ipcMain.handle('search-mods', async (event, query) => {
-  try {
-    return await searchModDB(query);
-  } catch (error) {
-    console.error('Mod Search failed:', error);
-    return [];
-  }
-});

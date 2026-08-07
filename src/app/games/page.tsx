@@ -8,8 +8,6 @@ const sourceFilters = [
   { key: "archive", label: "Archive.org" },
   { key: "fitgirl", label: "FitGirl" },
   { key: "steamunlocked", label: "SteamUnlocked" },
-  { key: "apunkagames", label: "ApunKaGames" },
-  { key: "filecr", label: "FileCR" },
 ];
 
 export default function GamesPage() {
@@ -18,8 +16,6 @@ export default function GamesPage() {
     archive: true,
     fitgirl: true,
     steamunlocked: true,
-    apunkagames: true,
-    filecr: true,
   });
   const [results, setResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);

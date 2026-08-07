@@ -1990,12 +1990,10 @@ ipcMain.handle('search-games', async (event, query, sources) => {
     if (src.archive) promises.push(searchArchiveOrg(query));
     if (src.fitgirl) promises.push(searchFitGirl(query));
     if (src.steamunlocked) promises.push(searchSteamUnlocked(query));
-    if (src.apunkagames) promises.push(searchApunKaGames(query));
-    if (src.filecr) promises.push(searchFileCR(query));
 
     // If no sources selected, search all
     if (promises.length === 0) {
-      promises.push(searchArchiveOrg(query), searchFitGirl(query), searchSteamUnlocked(query), searchApunKaGames(query), searchFileCR(query));
+      promises.push(searchArchiveOrg(query), searchFitGirl(query), searchSteamUnlocked(query));
     }
 
     const resultsArray = await Promise.all(promises);

@@ -25,7 +25,7 @@ export default function HomePage() {
           </div>
           <div className={styles.stats}>
             <div className={styles.statItem}>
-              <div className={styles.statNumber}>6</div>
+              <div className={styles.statNumber}>4</div>
               <div className={styles.statLabel}>Sources</div>
             </div>
             <div className={styles.statItem}>

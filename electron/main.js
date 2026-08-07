@@ -1972,6 +1972,72 @@ ipcMain.handle('launch-game', (event, exePath) => {
   }
 });
 
+// ---------------------------------------------------------------
+// Search relevance ranking: every result is scored against the
+// query so the most relevant games appear first, regardless of
+// which source they came from.
+// ---------------------------------------------------------------
+function normalizeMatchText(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function scoreSearchResult(result, query) {
+  const q = normalizeMatchText(query);
+  const qWords = q.split(' ').filter(Boolean);
+  if (!qWords.length) return 0;
+
+  const title = normalizeMatchText(result.title);
+  const description = normalizeMatchText(result.description);
+  let score = 0;
+
+  if (title === q) {
+    score = 100;                    // exact title match
+  } else if (title.startsWith(q)) {
+    score = 96;                     // title starts with the query
+  } else if (title.includes(q)) {
+    score = 92;                     // full phrase inside the title
+  } else {
+    // Word-level matching: how many query words appear in the title
+    const positions = [];
+    let matched = 0;
+    for (const w of qWords) {
+      const pos = title.indexOf(w);
+      if (pos !== -1) {
+        matched++;
+        positions.push(pos);
+      }
+    }
+    const ratio = matched / qWords.length;
+    if (matched === qWords.length) score = 85;
+    else if (ratio >= 0.75) score = 70;
+    else if (ratio >= 0.5) score = 55;
+    else if (ratio >= 0.25) score = 38;
+    else score = 18;
+
+    // Words that appear earlier in the title are a stronger signal
+    if (positions.length) {
+      const avgPos = positions.reduce((a, b) => a + b, 0) / positions.length;
+      score += Math.max(0, 8 - avgPos * 0.04);
+    }
+  }
+
+  // Phrase match in the description is a mild relevance signal
+  if (description.includes(q)) score += 6;
+
+  // Popularity / recency tie-breakers
+  const downloads = parseInt(result.downloads, 10) || 0;
+  if (downloads > 0) score += Math.min(5, Math.log10(downloads));
+  const year = parseInt(result.year, 10) || 0;
+  if (year >= 2022) score += 3;
+  else if (year >= 2018) score += 1.5;
+
+  return score;
+}
+
 // Game Search IPC
 ipcMain.handle('search-games', async (event, query, sources) => {
   try {
@@ -1981,7 +2047,6 @@ ipcMain.handle('search-games', async (event, query, sources) => {
       : (sources || {});
 
     const promises = [];
-    
     if (src.archive) promises.push(searchArchiveOrg(query));
     if (src.fitgirl) promises.push(searchFitGirl(query));
     if (src.steamunlocked) promises.push(searchSteamUnlocked(query));
@@ -1992,7 +2057,23 @@ ipcMain.handle('search-games', async (event, query, sources) => {
     }
 
     const resultsArray = await Promise.all(promises);
-    return resultsArray.flat();
+
+    // Deduplicate identical results (same source + same id)
+    const seen = new Set();
+    const unique = [];
+    for (const r of resultsArray.flat()) {
+      const key = `${r.source}::${r.id}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(r);
+      }
+    }
+
+    // Rank by relevance so the best matches come first
+    return unique
+      .map(r => ({ ...r, __score: scoreSearchResult(r, query) }))
+      .sort((a, b) => b.__score - a.__score)
+      .map(({ __score, ...r }) => r);
   } catch (error) {
     console.error('Unified Game Search failed:', error);
     return [];

@@ -1,32 +1,46 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 
+// Search pagination: scroll through every result page (up to SEARCH_MAX_PAGES)
+// so ALL matches load; the main process then ranks them by relevance.
+const SEARCH_MAX_PAGES = 4;
+
 async function searchFitGirl(query) {
+  const results = [];
+  const seen = new Set();
   try {
-    const url = `https://fitgirl-repacks.site/?s=${encodeURIComponent(query)}`;
-    const response = await axios.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      }
-    });
-    
-    const $ = cheerio.load(response.data);
-    const results = [];
-    
-    $('article.category-lossless-repack').each((i, element) => {
-      const titleElem = $(element).find('.entry-title a');
-      const title = titleElem.text().trim();
-      const link = titleElem.attr('href');
-      const date = $(element).find('time.entry-date').text().trim();
-      const description = $(element).find('.entry-summary p').text().trim();
-      
-      let size = 'Unknown';
-      const sizeMatch = description.match(/Repack Size:\s*(.+?)\s*\[/i) || description.match(/Repack Size:\s*(.+)/i);
-      if (sizeMatch && sizeMatch[1]) {
-        size = sizeMatch[1].trim();
-      }
-      
-      if (title && link) {
+    for (let page = 1; page <= SEARCH_MAX_PAGES; page++) {
+      const url = page === 1
+        ? `https://fitgirl-repacks.site/?s=${encodeURIComponent(query)}`
+        : `https://fitgirl-repacks.site/page/${page}/?s=${encodeURIComponent(query)}`;
+
+      const response = await axios.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        },
+        timeout: 20000
+      });
+
+      const $ = cheerio.load(response.data);
+      let pageCount = 0;
+
+      $('article.category-lossless-repack').each((i, element) => {
+        const titleElem = $(element).find('.entry-title a');
+        const title = titleElem.text().trim();
+        const link = titleElem.attr('href');
+        if (!title || !link || seen.has(link)) return;
+
+        const date = $(element).find('time.entry-date').text().trim();
+        const description = $(element).find('.entry-summary p').text().trim();
+
+        let size = 'Unknown';
+        const sizeMatch = description.match(/Repack Size:\s*(.+?)\s*\[/i) || description.match(/Repack Size:\s*(.+)/i);
+        if (sizeMatch && sizeMatch[1]) {
+          size = sizeMatch[1].trim();
+        }
+
+        seen.add(link);
+        pageCount++;
         results.push({
           id: link,
           title: title,
@@ -37,15 +51,19 @@ async function searchFitGirl(query) {
           thumbnail: 'https://fitgirl-repacks.site/wp-content/uploads/2016/08/cropped-icon-192x192.jpg',
           url: link
         });
-      }
-    });
-    
-    const topResults = results.slice(0, 5);
+      });
+
+      // Nothing new on this page -> no more pages to scroll
+      if (pageCount === 0) break;
+    }
+
+    // Fetch real cover images for the top matches (parallel, best-effort)
+    const topResults = results.slice(0, 8);
     await Promise.all(topResults.map(async (result) => {
       try {
         const gameRes = await axios.get(result.url, {
           headers: { 'User-Agent': 'Mozilla/5.0' },
-          timeout: 4000
+          timeout: 3000
         });
         const game$ = cheerio.load(gameRes.data);
         const img = game$('.entry-content img').first().attr('src') || game$('img').first().attr('src');
@@ -56,11 +74,11 @@ async function searchFitGirl(query) {
         // Fallback to default icon
       }
     }));
-    
+
     return results;
   } catch (error) {
     console.error('FitGirl search error:', error);
-    return [];
+    return results;
   }
 }
 

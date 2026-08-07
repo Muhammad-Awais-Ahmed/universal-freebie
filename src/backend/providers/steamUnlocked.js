@@ -1,26 +1,40 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 
+// Search pagination: scroll through every result page (up to SEARCH_MAX_PAGES)
+// so ALL matches load; the main process then ranks them by relevance.
+const SEARCH_MAX_PAGES = 4;
+
 async function searchSteamUnlocked(query) {
+  const results = [];
+  const seen = new Set();
   try {
-    const url = `https://steamunlocked.org/?s=${encodeURIComponent(query)}`;
-    const response = await axios.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      }
-    });
-    
-    const $ = cheerio.load(response.data);
-    const results = [];
-    
-    $('.cover-item.category').each((i, element) => {
-      const titleElem = $(element).find('.cover-item-title a h2');
-      const title = titleElem.text().trim();
-      const link = $(element).find('.cover-item-title a').attr('href');
-      const imgElem = $(element).find('.cover-item-image img');
-      const thumbnail = imgElem.attr('src') || imgElem.attr('data-src');
-      
-      if (title && link) {
+    for (let page = 1; page <= SEARCH_MAX_PAGES; page++) {
+      const url = page === 1
+        ? `https://steamunlocked.org/?s=${encodeURIComponent(query)}`
+        : `https://steamunlocked.org/page/${page}/?s=${encodeURIComponent(query)}`;
+
+      const response = await axios.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        },
+        timeout: 20000
+      });
+
+      const $ = cheerio.load(response.data);
+      let pageCount = 0;
+
+      $('.cover-item.category').each((i, element) => {
+        const titleElem = $(element).find('.cover-item-title a h2');
+        const title = titleElem.text().trim();
+        const link = $(element).find('.cover-item-title a').attr('href');
+        if (!title || !link || seen.has(link)) return;
+
+        const imgElem = $(element).find('.cover-item-image img');
+        const thumbnail = imgElem.attr('src') || imgElem.attr('data-src');
+
+        seen.add(link);
+        pageCount++;
         results.push({
           id: link,
           title: title,
@@ -29,13 +43,16 @@ async function searchSteamUnlocked(query) {
           thumbnail: thumbnail || 'https://steamunlocked.org/wp-content/uploads/2025/10/SteamUnlocked.png',
           url: link
         });
-      }
-    });
-    
+      });
+
+      // Nothing new on this page -> no more pages to scroll
+      if (pageCount === 0) break;
+    }
+
     return results;
   } catch (error) {
     console.error('SteamUnlocked search error:', error);
-    return [];
+    return results;
   }
 }
 

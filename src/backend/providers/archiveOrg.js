@@ -1,26 +1,47 @@
 const axios = require('axios');
 
+// Search pagination: archive.org returns up to SEARCH_ROWS items per page, so
+// we scroll through every page (up to SEARCH_MAX_PAGES) to load ALL matches;
+// the main process then ranks them by relevance.
+const SEARCH_ROWS = 50;
+const SEARCH_MAX_PAGES = 8;
+
 async function searchArchiveOrg(query) {
+  const results = [];
   try {
-    const encodedQuery = encodeURIComponent(`title:("${query}") AND mediatype:(software)`);
-    const url = `https://archive.org/advancedsearch.php?q=${encodedQuery}&fl[]=identifier,title,description,downloads,item_size,year&rows=20&output=json`;
-    
-    const response = await axios.get(url);
-    const docs = response.data?.response?.docs || [];
-    
-    return docs.map(doc => ({
-      id: doc.identifier,
-      title: doc.title || 'Unknown Title',
-      source: 'Archive.org',
-      description: doc.description || '',
-      downloads: doc.downloads || 0,
-      size: doc.item_size || 'Unknown Size',
-      year: doc.year || 'Unknown Year',
-      thumbnail: `https://archive.org/services/img/${doc.identifier}`
-    }));
+    // Match every query word in the title (not just the exact phrase) so the
+    // widest set of relevant items loads, then relevance ranking orders them.
+    const words = query.split(/\s+/).filter(Boolean).map(w => `"${w.replace(/"/g, '')}"`).join(' AND ');
+    const encodedQuery = encodeURIComponent(`title:(${words}) AND mediatype:(software)`);
+    let numFound = Infinity;
+
+    for (let page = 1; page <= SEARCH_MAX_PAGES; page++) {
+      if ((page - 1) * SEARCH_ROWS >= numFound) break;
+
+      const url = `https://archive.org/advancedsearch.php?q=${encodedQuery}&fl[]=identifier,title,description,downloads,item_size,year&rows=${SEARCH_ROWS}&page=${page}&output=json`;
+      const response = await axios.get(url, { timeout: 30000 });
+      const docs = response.data?.response?.docs || [];
+      numFound = response.data?.response?.numFound || docs.length;
+
+      results.push(...docs.map(doc => ({
+        id: doc.identifier,
+        title: doc.title || 'Unknown Title',
+        source: 'Archive.org',
+        description: doc.description || '',
+        downloads: doc.downloads || 0,
+        size: doc.item_size || 'Unknown Size',
+        year: doc.year || 'Unknown Year',
+        thumbnail: `https://archive.org/services/img/${doc.identifier}`
+      })));
+
+      // Last page reached when a page returns fewer rows than requested
+      if (docs.length < SEARCH_ROWS) break;
+    }
+
+    return results;
   } catch (error) {
     console.error('Archive.org search error:', error);
-    return [];
+    return results;
   }
 }
 

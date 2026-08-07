@@ -1,8 +1,9 @@
 {
   "name": "universal-freebie",
   "version": "1.0.0",
-  "description": "Universal Freebie - Game & Mod download manager (Electron + Next.js)",
+  "description": "Universal Freebie - Game download manager (Electron + Next.js)",
   "private": true,
+  "license": "SEE LICENSE IN LICENSE",
   "main": "electron/main.js",
   "scripts": {
     "dev": "next dev",

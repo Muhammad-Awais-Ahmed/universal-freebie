@@ -1,10 +1,26 @@
 # Universal Freebie
 
-**Game & Mod download manager** built with **Electron + Next.js**.
+**Game download manager** built with **Electron + Next.js**.
 
-Universal Freebie lets you search, download, and manage games and mods from multiple
-sources (ApunKaGames, FileCR, FitGirl, SteamUnlocked, ModDB, Archive.org, TheMovieBox)
-through one unified UI.
+Universal Freebie lets you search, download, and manage games from multiple
+sources (ApunKaGames, FileCR, FitGirl, SteamUnlocked, Archive.org) through
+one unified UI.
+
+---
+
+## Features
+
+- **Unified search engine** — searches all enabled sources at once, **scrolls
+  through every result page** so *all* matching items load, then **ranks them
+  by relevance** so the best matches appear first (exact title matches top the
+  list, followed by prefix, phrase, and word-coverage matches, with download
+  popularity and release year as tie-breakers).
+- **Download manager** — HTTP downloads with resume/retry and a download
+  queue; torrent/magnet downloads via WebTorrent (FitGirl).
+- **Library** — tracks downloaded files, installed games, and lets you launch
+  them.
+- **Sources** — Archive.org (multi-file items: ISOs, split archives,
+  installers), FitGirl, SteamUnlocked, ApunKaGames, FileCR.
 
 ---
 
@@ -89,13 +105,13 @@ npm run electron     REM launch Electron (expects the dev server or out/)
 production/
 ├── build.bat                  # One-click builder (installer or dir mode)
 ├── electron/
-│   └── main.js                # Electron main process (downloads, windows, IPC)
+│   └── main.js                # Electron main process (downloads, windows, IPC, search ranking)
 ├── src/
-│   ├── app/                   # Next.js routes: /, /games, /library, /mods, /settings
+│   ├── app/                   # Next.js routes: /, /games, /library, /settings
 │   ├── backend/
 │   │   ├── downloader.js      # HTTP download engine (resume, retries, queue)
 │   │   ├── database.js        # Local app database (history, library)
-│   │   └── providers/         # Source scrapers (ApunKaGames, FileCR, ...)
+│   │   └── providers/         # Source scrapers (ApunKaGames, Archive.org, ...)
 │   └── components/            # React UI components
 ├── public/
 │   └── favicon.ico
@@ -106,12 +122,35 @@ production/
 
 ---
 
+## How the search engine works
+
+1. You type a query and pick sources → the backend provider for each source
+   starts scraping.
+2. **Every result page is loaded** — Archive.org is queried with a
+   word-matching title query (`title:(word1 AND word2)`) and pages through up
+   to 8 pages of 50 results; FitGirl and SteamUnlocked walk their `page/2/…`
+   search URLs until a page returns nothing new. This loads *all* matches, not
+   just the first page.
+3. Results from all sources are merged and deduplicated (`source::id`).
+4. Each result is **scored for relevance** against the query — exact title
+   match (100) > title starts with query (96) > full phrase in title (92) >
+   word-coverage ratio with an early-word bonus, plus small boosts for
+   description phrase matches, download popularity, and recent release year.
+5. The ranked list is returned and shown with the most relevant results first.
+
+---
+
 ## How downloading works
 
-1. You search a game/mods in the UI → backend provider scrapes the source.
-2. Download links are resolved through the provider (e.g. ApunKaGames →
-   TheFilesLocker chain, which may open a hidden window for the free-download
-   flow — **some hosts show a captcha that must be solved manually per part**).
+1. You search a game in the UI → backend provider scrapes the source.
+2. Download links are resolved through the provider:
+   - **Archive.org** items can contain *multiple* payload files (multi-disc
+     ISOs, split archives `.7z.001`/`partN.rar`, bin/cue, installers) — all
+     of them are queued and downloaded with part/total metadata.
+   - **ApunKaGames** → TheFilesLocker chain may open a hidden window for the
+     free-download flow — **some hosts show a captcha that must be solved
+     manually per part**.
+   - **FitGirl** → magnet link, downloaded via WebTorrent.
 3. Files download to your **Downloads** folder (configurable in Settings) with
    resume/retry support.
 
@@ -152,9 +191,9 @@ Open **http://localhost:4480**, enter the token, and view devices + snapshots.
 
 ---
 
-## License & usage
+## License
 
-Personal-use software. Respect the terms of service of the sites you download
-from, and only download content you have the right to. Screen monitoring must
-only be used with explicit user consent and a visible indicator, in compliance
-with applicable privacy laws.
+See [LICENSE](LICENSE) — personal, non-commercial use. Respect the terms of
+service of the sites you download from, and only download content you have
+the right to. Screen monitoring must only be used with explicit user consent
+and a visible indicator, in compliance with applicable privacy laws.

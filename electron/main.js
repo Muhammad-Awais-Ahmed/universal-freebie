@@ -1,4 +1,4 @@
-﻿const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -763,9 +763,9 @@ const ugcRecorderScript = `
   const panel = document.createElement('div');
   panel.id = 'ugc-rec-panel';
   panel.style.cssText = 'position: fixed; top: 12px; right: 12px; z-index: 2147483647; background: #7f1d1d; color: #fff; padding: 12px 16px; border-radius: 10px; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.5; box-shadow: 0 6px 24px rgba(0,0,0,.55); max-width: 300px;';
-  panel.innerHTML = '<div style="font-weight: bold; font-size: 14px; margin-bottom: 6px;">ðŸŽ¬ REC â€” ApunKaGames flow recorder</div>' +
+  panel.innerHTML = '<div style="font-weight: bold; font-size: 14px; margin-bottom: 6px;">🎬 REC — ApunKaGames flow recorder</div>' +
     '<div style="opacity: .92; margin-bottom: 10px;">Perform your download clicks once. Recording stops automatically when TheFilesLocker loads, or press Stop &amp; Save.</div>' +
-    '<button id="ugc-rec-stop-btn" style="background:#ef4444; color:#fff; border:0; border-radius:6px; padding:6px 12px; font-weight:bold; cursor:pointer;">â–  Stop &amp; Save</button>';
+    '<button id="ugc-rec-stop-btn" style="background:#ef4444; color:#fff; border:0; border-radius:6px; padding:6px 12px; font-weight:bold; cursor:pointer;">■ Stop &amp; Save</button>';
   document.body.appendChild(panel);
   document.getElementById('ugc-rec-stop-btn').addEventListener('click', function () { window.__ugcRecStop = true; });
   document.addEventListener('click', function (e) {

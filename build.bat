@@ -34,6 +34,36 @@ set MODE=installer
 if /i "%~1"=="dir" set MODE=dir
 if /i "%~1"=="dir-only" set MODE=dir
 
+REM ---------- Step 0: ensure Electron binary is present ----------
+REM Electron's postinstall downloads the runtime binary. On a fresh PC the
+REM install script may be skipped (e.g. npm allow-scripts), leaving node_modules
+REM without electron.exe. Detect that and fetch it explicitly so the build never
+REM depends on a machine-specific install step.
+set ELECTRON_OK=0
+if exist "node_modules\electron\dist\electron.exe" set ELECTRON_OK=1
+if "%ELECTRON_OK%"=="0" (
+    echo [STEP 0] Electron runtime binary missing - fetching it now...
+    call npm rebuild electron 2>nul
+    if exist "node_modules\electron\dist\electron.exe" set ELECTRON_OK=1
+)
+if "%ELECTRON_OK%"=="0" (
+    echo   electron.exe still missing - running electron's install script directly...
+    if exist "node_modules\electron\install.js" (
+        pushd node_modules\electron
+        node install.js
+        popd
+    )
+    if exist "node_modules\electron\dist\electron.exe" set ELECTRON_OK=1
+)
+if "%ELECTRON_OK%"=="0" (
+    echo [ERROR] Could not obtain the Electron runtime binary. Check your network
+    echo         connection and that node_modules\electron exists, then retry.
+    pause
+    exit /b 1
+)
+echo   Electron runtime present.
+echo.
+
 echo [STEP 1/4] Installing dependencies...
 if exist node_modules (
     echo   node_modules found - running "npm install" to sync...

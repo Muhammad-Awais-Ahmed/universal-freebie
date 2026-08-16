@@ -4,6 +4,7 @@
   "description": "Universal Freebie - Game download manager (Electron + Next.js)",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
+  "author": "Universal Freebie",
   "main": "electron/main.js",
   "scripts": {
     "dev": "next dev",
@@ -38,6 +39,8 @@
   "build": {
     "appId": "com.universal.freebie",
     "productName": "Universal Freebie",
+    "npmRebuild": false,
+    "buildDependenciesFromSource": false,
     "directories": {
       "output": "dist"
     },
@@ -55,8 +58,7 @@
       "node_modules/utp-native/**/*"
     ],
     "win": {
-      "target": "nsis",
-      "icon": "public/favicon.ico"
+      "target": "nsis"
     }
   }
 }

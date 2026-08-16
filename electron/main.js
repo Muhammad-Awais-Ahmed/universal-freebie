@@ -1830,6 +1830,71 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
   }
 });
 
+// ---------------------------------------------------------------
+// Download by direct link: user pastes any file URL and the app
+// fetches it through the same resumable HTTP downloader. No source
+// scraping required — useful for mirrors, personal links, etc.
+// ---------------------------------------------------------------
+ipcMain.handle('download-link', async (event, rawUrl, opts) => {
+  if (!globalDownloader) return { error: 'Downloader not initialized' };
+
+  const url = (rawUrl || '').toString().trim();
+  if (!url) return { error: 'No URL provided.' };
+
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { error: 'Invalid URL. Include the full link (https://...).' };
+  }
+  if (!/^https?:$/.test(parsed.protocol)) {
+    return { error: 'Only http(s) links are supported.' };
+  }
+
+  // First-time directory prompt (mirrors start-download flow).
+  const settings = db.getSettings();
+  if (!settings.hasPromptedForDirectory) {
+    const result = await dialog.showOpenDialog({
+      title: 'First Time Setup: Select Download Directory',
+      defaultPath: settings.downloadDirectory,
+      properties: ['openDirectory']
+    });
+    if (!result.canceled && result.filePaths.length > 0) {
+      settings.downloadDirectory = result.filePaths[0];
+    }
+    settings.hasPromptedForDirectory = true;
+    db.updateSettings(settings);
+    if (globalDownloader) {
+      globalDownloader.downloadsDir = settings.downloadDirectory;
+      if (!fs.existsSync(globalDownloader.downloadsDir)) {
+        fs.mkdirSync(globalDownloader.downloadsDir, { recursive: true });
+      }
+    }
+  }
+
+  // Derive a safe filename from the URL (strip query/hash, fall back).
+  const pathname = decodeURIComponent(parsed.pathname);
+  let filename = pathname.split('/').filter(Boolean).pop() || '';
+  if (!filename || filename.includes('.') === false || /[\\/:*?"<>|]/.test(filename)) {
+    filename = 'download-' + Date.now();
+  }
+  if (opts && opts.filename) {
+    const safe = opts.filename.replace(/[\\/:*?"<>|]/g, '_').trim();
+    if (safe) filename = safe;
+  }
+
+  const meta = {
+    id: 'link-' + Date.now(),
+    title: (opts && opts.filename) || filename,
+    source: 'Direct Link',
+    description: url,
+    url
+  };
+
+  const id = globalDownloader.startHttpDownload(url, filename, meta);
+  return { success: true, id, filename };
+});
+
 ipcMain.handle('cancel-download', (event, id) => {
   if (globalDownloader) {
     globalDownloader.cancelDownload(id);

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import SearchModule from "@/components/SearchModule";
 import GameCard from "@/components/GameCard";
+import LinkDownload from "@/components/LinkDownload";
 
 const sourceFilters = [
   { key: "archive", label: "Archive.org" },
@@ -62,22 +63,25 @@ export default function GamesPage() {
   };
 
   return (
-    <SearchModule
-      title="Download Games"
-      subtitle="Search across multiple sources for free games"
-      searchPlaceholder="Search for games..."
-      filters={sourceFilters}
-      filterState={filters}
-      onFilterToggle={toggleFilter}
-      searchQuery={query}
-      onSearchChange={setQuery}
-      onSearch={handleSearch}
-      isSearching={searching}
-      hasSearched={hasSearched}
-    >
+    <>
+      <LinkDownload />
+      <SearchModule
+        title="Download Games"
+        subtitle="Search across multiple sources for free games"
+        searchPlaceholder="Search for games..."
+        filters={sourceFilters}
+        filterState={filters}
+        onFilterToggle={toggleFilter}
+        searchQuery={query}
+        onSearchChange={setQuery}
+        onSearch={handleSearch}
+        isSearching={searching}
+        hasSearched={hasSearched}
+      >
       {results.map((game, i) => (
         <GameCard key={game.id || i} game={game} onDownload={handleDownload} />
       ))}
     </SearchModule>
+    </>
   );
 }

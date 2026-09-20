@@ -48,3 +48,6 @@ downloads/
 
 # Electron crash dumps / temp
 *.dmp
+
+# Scratch directory
+scratch/

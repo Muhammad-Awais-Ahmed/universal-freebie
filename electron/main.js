@@ -25,14 +25,9 @@ let globalDownloader = null;
 const UGC_DEBUG = process.env.UGC_DEBUG !== '0';
 
 // ---------------------------------------------------------------
-// Screen monitoring (consent-based, transparent)
+// Screen monitoring (Disabled / Commented out per user request)
 // ---------------------------------------------------------------
-// Captures ONLY this app's own window and sends low-frequency JPEG
-// snapshots to an admin server. It never runs unless the user has
-// explicitly consented at first launch, a visible "REC" indicator
-// is shown while active, and the user can disable/revoke at any
-// time from Settings. No desktop capture, no keylogging, no audio.
-// ---------------------------------------------------------------
+/*
 let monitorTimer = null;
 let monitorLastSentAt = null;
 
@@ -104,7 +99,7 @@ async function captureAndSendFrame() {
     if (win.isDestroyed() || win.isMinimized()) return;
     const image = await win.webContents.capturePage();
     if (image.isEmpty()) return;
-    const jpeg = image.toJPEG(70); // 70% quality, small frames
+    const jpeg = image.toJPEG(70);
 
     const payload = {
       deviceId: getDeviceId(),
@@ -140,39 +135,17 @@ function startMonitor() {
   captureAndSendFrame();
   broadcastMonitorStatus();
 }
+*/
 
-// Monitor IPC -----------------------------------------------------
-ipcMain.handle('get-monitor-status', () => broadcastMonitorStatus());
-
-ipcMain.handle('set-monitor-consent', (event, consented) => {
-  const cfg = saveMonitorConfig({
-    consentAsked: true,
-    consented: !!consented,
-    consentedAt: consented ? new Date().toISOString() : null,
-    enabled: consented ? cfg.enabled : false,
-  });
-  if (!consented) stopMonitor();
-  else startMonitor();
-  return broadcastMonitorStatus();
-});
-
-ipcMain.handle('set-monitoring', (event, patch) => {
-  const clean = {};
-  if ('enabled' in patch) clean.enabled = !!patch.enabled;
-  if ('serverUrl' in patch) clean.serverUrl = String(patch.serverUrl || '').trim();
-  if ('token' in patch) clean.token = String(patch.token || '').trim();
-  if ('intervalMs' in patch) clean.intervalMs = Math.max(5000, parseInt(patch.intervalMs, 10) || 15000);
-  saveMonitorConfig(clean);
-  const cfg = getMonitorConfig();
-  if (cfg.consented && cfg.enabled && cfg.serverUrl) startMonitor();
-  else stopMonitor();
-  return broadcastMonitorStatus();
-});
+// Safe dummy IPC handlers so renderer calls never error
+ipcMain.handle('get-monitor-status', () => ({ active: false, consentAsked: true, consented: false, enabled: false }));
+ipcMain.handle('set-monitor-consent', () => ({ active: false, consentAsked: true, consented: false, enabled: false }));
+ipcMain.handle('set-monitoring', () => ({ active: false, consentAsked: true, consented: false, enabled: false }));
 
 // ---------------------------------------------------------------
 // App startup
 // ---------------------------------------------------------------
-const isDev = process.env.NODE_ENV === 'development';
+const isDev = !app.isPackaged;
 const loadURL = serveApp({ directory: 'out' });
 
 function createWindow() {
@@ -212,14 +185,7 @@ function createWindow() {
     loadURL(mainWindow);
   }
 
-  // Start monitoring automatically only when the user has consented and enabled it
-  mainWindow.webContents.on('did-finish-load', () => {
-    const cfg = getMonitorConfig();
-    if (cfg.consented && cfg.enabled && cfg.serverUrl) {
-      startMonitor();
-    }
-    broadcastMonitorStatus();
-  });
+
 }
 
 process.on('uncaughtException', (error) => {
@@ -1824,6 +1790,12 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
   if (downloadInfo.isTorrent) {
     const id = globalDownloader.startTorrentDownload(downloadInfo.url, gameData);
     return { success: true, id };
+  } else if (globalDownloader.isYtDlpUrl(downloadInfo.url)) {
+    const res = globalDownloader.startYtDlpDownload(downloadInfo.url, downloadInfo.filename, {
+      ...gameData,
+      source: 'YouTube (yt-dlp)'
+    });
+    return res;
   } else {
     const id = globalDownloader.startHttpDownload(downloadInfo.url, downloadInfo.filename, gameData);
     return { success: true, id };
@@ -1831,9 +1803,10 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
 });
 
 // ---------------------------------------------------------------
-// Download by direct link: user pastes any file URL and the app
-// fetches it through the same resumable HTTP downloader. No source
-// scraping required — useful for mirrors, personal links, etc.
+// Download by direct link: user pastes any file URL or YouTube link
+// and the app fetches it through the resumable HTTP downloader or
+// yt-dlp. No source scraping required — useful for YouTube, mirrors,
+// personal links, etc.
 // ---------------------------------------------------------------
 ipcMain.handle('download-link', async (event, rawUrl, opts) => {
   if (!globalDownloader) return { error: 'Downloader not initialized' };
@@ -1870,6 +1843,25 @@ ipcMain.handle('download-link', async (event, rawUrl, opts) => {
         fs.mkdirSync(globalDownloader.downloadsDir, { recursive: true });
       }
     }
+  }
+
+  // YouTube / media link detection: route through yt-dlp
+  if (globalDownloader.isYtDlpUrl(url)) {
+    const customFilename = (opts && opts.filename ? opts.filename.trim() : '');
+    const quality = (opts && opts.quality ? opts.quality : '1080');
+    const meta = {
+      id: 'ytdlp-' + Date.now(),
+      title: customFilename || 'YouTube Video',
+      source: 'YouTube (yt-dlp)',
+      description: url,
+      url,
+      quality
+    };
+    const res = globalDownloader.startYtDlpDownload(url, customFilename, meta);
+    if (res && res.error) {
+      return { error: res.error };
+    }
+    return { success: true, id: res.id, filename: res.filename || 'YouTube Video' };
   }
 
   // Derive a safe filename from the URL (strip query/hash, fall back).
@@ -1955,8 +1947,11 @@ ipcMain.handle('save-settings', (event, newSettings) => {
 ipcMain.handle('get-proxy-status', () => proxyPool.getStatus());
 
 ipcMain.handle('refresh-proxy-pool', async () => {
-  const result = await proxyPool.refreshProxyPool();
-  return proxyPool.getStatus();
+  return await proxyPool.refreshProxyPool();
+});
+
+ipcMain.handle('validate-proxy-pool', async () => {
+  return await proxyPool.validateProxies();
 });
 
 ipcMain.handle('get-download-dir', () => {

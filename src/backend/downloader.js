@@ -1,10 +1,146 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const { spawn, execSync } = require('child_process');
 const { app } = require('electron');
 const db = require('./database');
 const WebTorrent = require('webtorrent');
 const proxyPool = require('./proxyPool');
+
+let cachedYtDlpPath = null;
+function findYtDlpBinary() {
+  if (cachedYtDlpPath && fs.existsSync(cachedYtDlpPath)) return cachedYtDlpPath;
+
+  try {
+    const cmd = process.platform === 'win32' ? 'where.exe yt-dlp' : 'which yt-dlp';
+    const out = execSync(cmd, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    const firstLine = out.split(/\r?\n/)[0];
+    if (firstLine && fs.existsSync(firstLine)) {
+      cachedYtDlpPath = firstLine;
+      return firstLine;
+    }
+  } catch (e) {}
+
+  if (process.platform === 'win32') {
+    const pythonDirs = ['Python314', 'Python313', 'Python312', 'Python311', 'Python310', 'Python'];
+    for (const pDir of pythonDirs) {
+      const p1 = path.join(process.env.APPDATA || '', 'Python', pDir, 'Scripts', 'yt-dlp.exe');
+      if (fs.existsSync(p1)) {
+        cachedYtDlpPath = p1;
+        return p1;
+      }
+      const p2 = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', pDir, 'Scripts', 'yt-dlp.exe');
+      if (fs.existsSync(p2)) {
+        cachedYtDlpPath = p2;
+        return p2;
+      }
+    }
+  }
+
+  return 'yt-dlp';
+}
+
+let cachedNodePath = null;
+function findNodeBinary() {
+  if (cachedNodePath && fs.existsSync(cachedNodePath)) return cachedNodePath;
+  try {
+    const cmd = process.platform === 'win32' ? 'where.exe node' : 'which node';
+    const out = execSync(cmd, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    const firstLine = out.split(/\r?\n/)[0];
+    if (firstLine && fs.existsSync(firstLine)) {
+      cachedNodePath = firstLine;
+      return firstLine;
+    }
+  } catch (e) {}
+  return 'node';
+}
+
+let cachedFfmpegPath = null;
+function findFfmpegBinary() {
+  if (cachedFfmpegPath && fs.existsSync(cachedFfmpegPath)) return cachedFfmpegPath;
+
+  try {
+    const cmd = process.platform === 'win32' ? 'where.exe ffmpeg' : 'which ffmpeg';
+    const out = execSync(cmd, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    const firstLine = out.split(/\r?\n/)[0];
+    if (firstLine && fs.existsSync(firstLine)) {
+      cachedFfmpegPath = firstLine;
+      return firstLine;
+    }
+  } catch (e) {}
+
+  if (process.platform === 'win32') {
+    const pythonDirs = ['Python314', 'Python313', 'Python312', 'Python311', 'Python310', 'Python'];
+    for (const pDir of pythonDirs) {
+      const candidates = [
+        path.join(process.env.APPDATA || '', 'Python', pDir, 'site-packages', 'imageio_ffmpeg', 'binaries'),
+        path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', pDir, 'Lib', 'site-packages', 'imageio_ffmpeg', 'binaries'),
+        path.join(process.env.APPDATA || '', 'Python', pDir, 'Scripts'),
+        path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', pDir, 'Scripts'),
+      ];
+      for (const dir of candidates) {
+        if (fs.existsSync(dir)) {
+          try {
+            const files = fs.readdirSync(dir);
+            const ffmpegFile = files.find(f => f.toLowerCase().startsWith('ffmpeg') && f.toLowerCase().endsWith('.exe'));
+            if (ffmpegFile) {
+              const fullPath = path.join(dir, ffmpegFile);
+              cachedFfmpegPath = fullPath;
+              return fullPath;
+            }
+          } catch (e) {}
+        }
+      }
+    }
+  }
+
+  try {
+    const pyCmd = 'python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"';
+    const out = execSync(pyCmd, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    const firstLine = out.split(/\r?\n/)[0];
+    if (firstLine && fs.existsSync(firstLine)) {
+      cachedFfmpegPath = firstLine;
+      return firstLine;
+    }
+  } catch (e) {}
+
+  return null;
+}
+
+function buildFormatArgs(quality, ffmpegBin) {
+  const args = [];
+  const q = (quality || '1080').toString().toLowerCase().replace('p', '');
+
+  if (ffmpegBin) {
+    args.push('--ffmpeg-location', ffmpegBin);
+    if (q === 'audio') {
+      args.push('-f', 'ba/best', '-x', '--audio-format', 'mp3', '--audio-quality', '0');
+    } else if (q === 'best' || q === 'max') {
+      args.push('-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4');
+    } else {
+      const height = parseInt(q, 10);
+      if (!isNaN(height) && height > 0) {
+        args.push('-f', `bestvideo[height<=${height}]+bestaudio/best[height<=${height}]/best`, '--merge-output-format', 'mp4');
+      } else {
+        args.push('-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best', '--merge-output-format', 'mp4');
+      }
+    }
+  } else {
+    if (q === 'audio') {
+      args.push('-f', 'ba/best');
+    } else if (q === 'best' || q === 'max') {
+      args.push('-f', 'bestvideo+bestaudio/b/best');
+    } else {
+      const height = parseInt(q, 10);
+      if (!isNaN(height) && height > 0) {
+        args.push('-f', `bestvideo[height<=${height}]+bestaudio/b[height<=${height}]/best[height<=${height}]/b/best`);
+      } else {
+        args.push('-f', 'bestvideo[height<=1080]+bestaudio/b[height<=1080]/best[height<=1080]/b/best');
+      }
+    }
+  }
+  return args;
+}
 
 const MAX_CHUNK_RETRIES = 5;
 const MAX_REPAIR_PASSES = 2;
@@ -15,6 +151,7 @@ class Downloader {
   constructor(mainWindow) {
     this.mainWindow = mainWindow;
     this.downloads = new Map();
+    this._childProcesses = new Map();
 
     try {
       this.torrentClient = new WebTorrent({
@@ -94,6 +231,358 @@ class Downloader {
     return id;
   }
 
+  isYtDlpUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    try {
+      const u = new URL(url.trim());
+      const h = u.hostname.toLowerCase();
+      return (
+        h === 'youtube.com' ||
+        h.endsWith('.youtube.com') ||
+        h === 'youtu.be' ||
+        h.endsWith('.youtu.be') ||
+        h.includes('youtube') ||
+        h.includes('youtu.be') ||
+        h.includes('vimeo.com') ||
+        h.includes('tiktok.com') ||
+        h.includes('twitch.tv') ||
+        h.includes('dailymotion.com')
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  startYtDlpDownload(url, customFilename, meta, existingId) {
+    const ytDlpBin = findYtDlpBinary();
+    const nodeBin = findNodeBinary();
+    const ffmpegBin = findFfmpegBinary();
+    const id = existingId || (meta && meta.id) || this.generateId();
+
+    const quality = (meta && meta.quality) || '1080';
+    const isAudio = quality.toString().toLowerCase().includes('audio');
+    const defaultExt = isAudio ? '.mp3' : '.mp4';
+
+    const rawSafeName = (customFilename || '').replace(/[\\/:*?"<>|]/g, '_').trim();
+    const initialFilename = rawSafeName || `YouTube_${id}${defaultExt}`;
+    const initialTitle = (meta && meta.title && meta.title !== url) ? meta.title : (rawSafeName || 'YouTube Video');
+    const initialFilePath = path.join(this.downloadsDir, initialFilename);
+
+    let item = this.downloads.get(id);
+    if (!item) {
+      item = {
+        id,
+        url,
+        filename: initialFilename,
+        filePath: initialFilePath,
+        meta: {
+          ...meta,
+          title: initialTitle,
+          quality,
+          source: (meta && meta.source) || 'YouTube (yt-dlp)'
+        },
+        status: 'downloading',
+        progress: 0,
+        downloadedBytes: 0,
+        totalBytes: 0,
+        speed: 0,
+        type: 'ytdlp'
+      };
+      this.downloads.set(id, item);
+    } else {
+      item.status = 'downloading';
+      item.speed = 0;
+      item.error = undefined;
+      item.type = 'ytdlp';
+      if (item.meta) item.meta.quality = quality;
+    }
+
+    db.addDownloadToHistory(item);
+    this._emitProgress();
+
+    const settings = this._getSettings();
+    if (this._getActiveDownloadCount() > settings.maxConcurrent) {
+      item.status = 'queued';
+      this._emitProgress();
+      return { success: true, id, filename: item.filename };
+    }
+
+    const formatArgs = buildFormatArgs(quality, ffmpegBin);
+
+    const args = [
+      '--no-playlist',
+      '--js-runtimes', `node:${nodeBin}`,
+      '--remote-components', 'ejs:github',
+      '--extractor-args', 'youtube:player_client=web_embedded',
+      '--retries', '10',
+      '--fragment-retries', '10',
+      '--file-access-retries', '5',
+      ...formatArgs,
+      '--newline',
+      '--progress-template', 'download:PROG:%(progress._percent_str)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.speed)s',
+      '--paths', `home:${this.downloadsDir}`
+    ];
+
+    if (rawSafeName) {
+      if (!path.extname(rawSafeName)) {
+        args.push('-o', `${rawSafeName}.%(ext)s`);
+      } else {
+        args.push('-o', rawSafeName);
+      }
+    } else {
+      args.push('-o', '%(title)s [%(id)s].%(ext)s');
+    }
+
+    args.push(url);
+
+    let proc;
+    try {
+      proc = spawn(ytDlpBin, args, {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+      this._childProcesses.set(id, proc);
+    } catch (err) {
+      item.status = 'error';
+      item.error = `Failed to launch yt-dlp: ${err.message}`;
+      item.speed = 0;
+      db.updateDownloadHistory(item.id, {
+        status: 'error',
+        error: item.error
+      });
+      this._emitProgress();
+      return { error: item.error };
+    }
+
+    // Fast background title resolver so UI gets real title in 1-2s
+    if (!rawSafeName) {
+      try {
+        const titleProc = spawn(ytDlpBin, [
+          '--no-playlist',
+          '--js-runtimes', `node:${nodeBin}`,
+          '--extractor-args', 'youtube:player_client=web_embedded',
+          '--print', '%(title)s',
+          url
+        ], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+
+        let titleBuf = '';
+        titleProc.stdout.on('data', (d) => { titleBuf += d.toString(); });
+        titleProc.on('close', (code) => {
+          const foundTitle = titleBuf.trim().split(/\r?\n/)[0];
+          if (code === 0 && foundTitle && item.filename.startsWith('YouTube_ytdlp-')) {
+            const safeTitle = foundTitle.replace(/[\\/:*?"<>|]/g, '_').trim();
+            item.filename = `${safeTitle}${defaultExt}`;
+            if (item.meta) item.meta.title = foundTitle;
+            db.updateDownloadHistory(item.id, { filename: item.filename });
+            this._emitProgress();
+          }
+        });
+      } catch (e) {}
+    }
+
+    let lastEmitTime = 0;
+    let stdoutBuf = '';
+    let stderrBuf = '';
+    let lastErrorMsg = '';
+
+    const unitMult = (u) => {
+      if (!u) return 1;
+      const up = u.toUpperCase();
+      if (up.startsWith('G')) return 1024 * 1024 * 1024;
+      if (up.startsWith('M')) return 1024 * 1024;
+      if (up.startsWith('K')) return 1024;
+      return 1;
+    };
+
+    proc.stdout.on('data', (chunk) => {
+      stdoutBuf += chunk.toString();
+      const lines = stdoutBuf.split(/\r?\n/);
+      stdoutBuf = lines.pop();
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        // Merger match: [Merger] Merging formats into "D:\path\to\video.mp4"
+        const mergerMatch = trimmed.match(/\[Merger\]\s+Merging formats into\s+["']?(.+?)["']?$/i);
+        if (mergerMatch) {
+          const rawDest = mergerMatch[1].trim().replace(/^["']|["']$/g, '');
+          const cleanDest = path.isAbsolute(rawDest) ? rawDest : path.join(this.downloadsDir, rawDest);
+          item.filePath = cleanDest;
+          item.filename = path.basename(cleanDest);
+          if (!rawSafeName && item.meta) {
+            item.meta.title = path.basename(cleanDest, path.extname(cleanDest));
+          }
+          db.updateDownloadHistory(item.id, {
+            filename: item.filename,
+            filePath: item.filePath
+          });
+          this._emitProgress();
+          continue;
+        }
+
+        // Destination match: [download] Destination: D:\path\to\video.mp4
+        const destMatch = trimmed.match(/Destination:\s+(.+)$/i);
+        if (destMatch) {
+          const rawDest = destMatch[1].trim().replace(/^["']|["']$/g, '');
+          const cleanDest = path.isAbsolute(rawDest) ? rawDest : path.join(this.downloadsDir, rawDest);
+          const isComponent = /\.(?:f\d+|temp\w*)\.[^.]+$/i.test(cleanDest);
+          const cleanName = isComponent ? cleanDest.replace(/\.(?:f\d+|temp\w*)\./i, '.') : cleanDest;
+          item.filePath = cleanDest;
+          item.filename = path.basename(cleanName);
+          if (!rawSafeName && item.meta) {
+            item.meta.title = path.basename(cleanName, path.extname(cleanName));
+          }
+          db.updateDownloadHistory(item.id, {
+            filename: item.filename,
+            filePath: item.filePath
+          });
+          this._emitProgress();
+        }
+
+        // Already downloaded match: [download] D:\path\to\video.mp4 has already been downloaded
+        const alreadyMatch = trimmed.match(/\[download\]\s+(.+?)\s+has already been downloaded/i);
+        if (alreadyMatch) {
+          const rawDest = alreadyMatch[1].trim().replace(/^["']|["']$/g, '');
+          const cleanDest = path.isAbsolute(rawDest) ? rawDest : path.join(this.downloadsDir, rawDest);
+          item.filePath = cleanDest;
+          item.filename = path.basename(cleanDest);
+          item.progress = 100;
+          try {
+            if (fs.existsSync(cleanDest)) {
+              const stat = fs.statSync(cleanDest);
+              item.totalBytes = stat.size;
+              item.downloadedBytes = stat.size;
+            }
+          } catch (e) {}
+          db.updateDownloadHistory(item.id, {
+            filename: item.filename,
+            filePath: item.filePath
+          });
+          this._emitProgress();
+        }
+
+        // 1. PROG template match: PROG:  0.0%|1024|10751910|NA
+        if (trimmed.startsWith('PROG:')) {
+          const parts = trimmed.slice(5).split('|');
+          const percent = parseFloat(parts[0]);
+          const downloaded = parseInt(parts[1], 10);
+          const total = parseInt(parts[2], 10);
+          const speed = parseFloat(parts[3]);
+
+          if (!isNaN(percent)) item.progress = Math.min(100, Math.max(0, percent));
+          if (!isNaN(downloaded)) item.downloadedBytes = downloaded;
+          if (!isNaN(total) && total > 0) item.totalBytes = total;
+          item.speed = !isNaN(speed) ? speed : 0;
+
+          const now = Date.now();
+          if (now - lastEmitTime > 250) {
+            lastEmitTime = now;
+            this._emitProgress();
+          }
+          continue;
+        }
+
+        // 2. Standard yt-dlp progress line fallback:
+        // [download]   5.2% of   11.28MiB at    1.50MiB/s ETA 00:07
+        const stdMatch = trimmed.match(/\[download\]\s+([\d.]+)%\s+of\s+~?([\d.]+)\s*([KMGT]?i?B)(?:\s+at\s+([\d.]+)\s*([KMGT]?i?B\/s))?/i);
+        if (stdMatch) {
+          const pct = parseFloat(stdMatch[1]);
+          const sizeVal = parseFloat(stdMatch[2]);
+          const sizeUnit = stdMatch[3] || 'MiB';
+          const speedVal = stdMatch[4] ? parseFloat(stdMatch[4]) : null;
+          const speedUnit = stdMatch[5] || 'MiB/s';
+
+          if (!isNaN(pct)) item.progress = Math.min(100, Math.max(0, pct));
+          if (!isNaN(sizeVal)) {
+            const tot = Math.round(sizeVal * unitMult(sizeUnit));
+            item.totalBytes = tot;
+            item.downloadedBytes = Math.round(tot * (pct / 100));
+          }
+          if (speedVal) {
+            item.speed = Math.round(speedVal * unitMult(speedUnit));
+          }
+
+          const now = Date.now();
+          if (now - lastEmitTime > 250) {
+            lastEmitTime = now;
+            this._emitProgress();
+          }
+        }
+      }
+    });
+
+    proc.stderr.on('data', (chunk) => {
+      stderrBuf += chunk.toString();
+      const lines = stderrBuf.split(/\r?\n/);
+      stderrBuf = lines.pop();
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('ERROR:')) {
+          lastErrorMsg = trimmed.replace(/^ERROR:\s*/, '');
+        }
+      }
+    });
+
+    proc.on('close', (code) => {
+      this._childProcesses.delete(id);
+      if (item.status === 'cancelled') return;
+
+      if (code === 0) {
+        item.status = 'completed';
+        item.progress = 100;
+        item.speed = 0;
+        try {
+          if (!fs.existsSync(item.filePath)) {
+            const possibleMerged = item.filePath.replace(/\.(?:f\d+|temp\w*)\./i, '.');
+            if (fs.existsSync(possibleMerged)) {
+              item.filePath = possibleMerged;
+              item.filename = path.basename(possibleMerged);
+            } else {
+              const candidate = path.join(this.downloadsDir, item.filename);
+              if (fs.existsSync(candidate)) {
+                item.filePath = candidate;
+              }
+            }
+          }
+          if (fs.existsSync(item.filePath)) {
+            const stat = fs.statSync(item.filePath);
+            item.totalBytes = stat.size;
+            item.downloadedBytes = stat.size;
+          } else if (item.totalBytes) {
+            item.downloadedBytes = item.totalBytes;
+          }
+        } catch (e) {}
+
+        db.addDownloadToHistory(item);
+        db.updateDownloadHistory(item.id, {
+          status: 'completed',
+          downloadedBytes: item.downloadedBytes,
+          totalBytes: item.totalBytes,
+          filename: item.filename
+        });
+        this._emitProgress();
+        this._processQueue();
+        this._scheduleAutoRemove(item.id);
+      } else {
+        item.status = 'error';
+        item.error = lastErrorMsg || `yt-dlp download process exited with code ${code}`;
+        item.speed = 0;
+        db.updateDownloadHistory(item.id, {
+          status: 'error',
+          downloadedBytes: item.downloadedBytes || 0,
+          totalBytes: item.totalBytes || 0,
+          error: item.error
+        });
+        this._emitProgress();
+        this._processQueue();
+      }
+    });
+
+    return { success: true, id, filename: item.filename };
+  }
+
   _processQueue() {
     const settings = this._getSettings();
     while (this._getActiveDownloadCount() < settings.maxConcurrent) {
@@ -101,7 +590,11 @@ class Downloader {
       for (const [, item] of this.downloads) {
         if (item.status === 'queued') {
           item.status = 'downloading';
-          this._performHttpDownload(item.id, item._resumeUrl || item.url, item.filePath, item._resumeFrom || 0);
+          if (item.type === 'ytdlp') {
+            this.startYtDlpDownload(item.url, item.filename, item.meta, item.id);
+          } else {
+            this._performHttpDownload(item.id, item._resumeUrl || item.url, item.filePath, item._resumeFrom || 0);
+          }
           found = true;
           break;
         }
@@ -611,7 +1104,17 @@ class Downloader {
       totalBytes: item.totalBytes || 0
     });
 
-    if (item.type === 'torrent' && item.torrentInfo) {
+    const proc = this._childProcesses.get(id);
+    if (proc) {
+      try {
+        if (process.platform === 'win32') {
+          spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F']);
+        } else {
+          proc.kill('SIGKILL');
+        }
+      } catch (e) {}
+      this._childProcesses.delete(id);
+    } else if (item.type === 'torrent' && item.torrentInfo) {
       item.torrentInfo.destroy();
     } else if (item.type === 'electron' && item.electronItem) {
       item.electronItem.cancel();
@@ -624,6 +1127,16 @@ class Downloader {
   resumeDownload(id) {
     const item = this.downloads.get(id);
     if (!item) return;
+
+    if (item.type === 'ytdlp' || (item.url && this.isYtDlpUrl(item.url))) {
+      item.status = 'downloading';
+      item.speed = 0;
+      item.error = undefined;
+      db.updateDownloadHistory(id, { status: 'downloading' });
+      this._emitProgress();
+      this.startYtDlpDownload(item.url, item.filename, item.meta, item.id);
+      return;
+    }
 
     if (item.status === 'error' || item.status === 'cancelled') {
       const resumeFrom = item.downloadedBytes || 0;
@@ -662,6 +1175,14 @@ class Downloader {
 
     if (history.status === 'completed') return { error: 'Download is already complete.' };
 
+    if (history.type === 'ytdlp' || this.isYtDlpUrl(history.url)) {
+      this.startYtDlpDownload(history.url, history.filename, {
+        source: history.source || 'YouTube (yt-dlp)',
+        quality: (history.meta && history.meta.quality) || history.quality || '1080'
+      }, id);
+      return { success: true };
+    }
+
     const filePath = path.join(this.downloadsDir, history.filename);
     const resumeFrom = history.downloadedBytes || 0;
 
@@ -695,6 +1216,17 @@ class Downloader {
     const item = this.downloads.get(id);
     if (item) {
       if (item.status === 'downloading') this.cancelDownload(id);
+      if (item.type === 'torrent' && item.torrentInfo) {
+        try { item.torrentInfo.destroy(); } catch (e) {}
+      }
+      const proc = this._childProcesses.get(id);
+      if (proc) {
+        try {
+          if (process.platform === 'win32') spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F']);
+          else proc.kill('SIGKILL');
+        } catch (e) {}
+        this._childProcesses.delete(id);
+      }
       this.downloads.delete(id);
     }
     db.removeDownloadFromHistory(id);
@@ -708,6 +1240,17 @@ class Downloader {
    * sockets, no frozen "Not Responding" window).
    */
   shutdown() {
+    for (const [, proc] of this._childProcesses) {
+      try {
+        if (process.platform === 'win32') {
+          spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F']);
+        } else {
+          proc.kill('SIGKILL');
+        }
+      } catch (err) {}
+    }
+    this._childProcesses.clear();
+
     for (const [, item] of this.downloads) {
       if (item.status === 'downloading' || item.status === 'queued') {
         this.cancelDownload(item.id);
@@ -731,6 +1274,16 @@ class Downloader {
     setTimeout(() => {
       const item = this.downloads.get(id);
       if (item && (item.status === 'completed' || item.status === 'cancelled')) {
+        if (item.type === 'torrent' && item.torrentInfo) {
+          try { item.torrentInfo.destroy(); } catch (e) {}
+        }
+        if (item._writers) {
+          for (const w of item._writers) {
+            try { w.destroy(); } catch (e) {}
+          }
+          item._writers.clear();
+        }
+        this._childProcesses.delete(id);
         this.downloads.delete(id);
         this._emitProgress();
       }
@@ -842,11 +1395,31 @@ class Downloader {
     }
 
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      const downloadsArray = Array.from(this.downloads.values()).map(d => {
-        const { torrentInfo, electronItem, ...safeData } = d;
-        return safeData;
-      });
-      this.mainWindow.webContents.send('downloads-progress', downloadsArray);
+      const downloadsArray = Array.from(this.downloads.values()).map(d => ({
+        id: d.id,
+        url: d.url,
+        filename: d.filename,
+        filePath: d.filePath,
+        status: d.status,
+        progress: typeof d.progress === 'number' ? Math.min(100, Math.max(0, d.progress)) : 0,
+        downloadedBytes: typeof d.downloadedBytes === 'number' ? d.downloadedBytes : 0,
+        totalBytes: typeof d.totalBytes === 'number' ? d.totalBytes : 0,
+        speed: typeof d.speed === 'number' ? d.speed : 0,
+        type: d.type || 'http',
+        error: d.error,
+        meta: d.meta ? {
+          id: d.meta.id,
+          title: d.meta.title,
+          source: d.meta.source,
+          description: d.meta.description
+        } : undefined
+      }));
+
+      try {
+        this.mainWindow.webContents.send('downloads-progress', downloadsArray);
+      } catch (err) {
+        console.error('Failed to send downloads-progress over IPC:', err.message);
+      }
     }
   }
 }

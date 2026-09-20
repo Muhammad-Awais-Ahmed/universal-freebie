@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import styles from "./DownloadManager.module.css";
+import { formatNumericBytes } from "@/utils/formatters";
 
 interface DownloadItem {
   id: string;
@@ -15,8 +16,7 @@ interface DownloadItem {
 }
 
 function formatBytes(bytes: number, decimals = 2): string {
-  if (!bytes) return "0 MB";
-  return `${(bytes / 1048576).toFixed(decimals)} MB`;
+  return formatNumericBytes(bytes, decimals);
 }
 
 function getStatusText(item: DownloadItem): string {

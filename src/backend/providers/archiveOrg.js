@@ -6,6 +6,37 @@ const axios = require('axios');
 const SEARCH_ROWS = 50;
 const SEARCH_MAX_PAGES = 8;
 
+function formatBytes(bytes) {
+  if (!bytes || isNaN(bytes)) return 'Unknown Size';
+  const n = Number(bytes);
+  if (n <= 0) return 'Unknown Size';
+  const k = 1024;
+  if (n >= k * k * k) return (n / (k * k * k)).toFixed(2) + ' GB';
+  if (n >= k * k) return (n / (k * k)).toFixed(1) + ' MB';
+  if (n >= k) return (n / k).toFixed(1) + ' KB';
+  return n + ' B';
+}
+
+function extractDocYear(doc) {
+  if (doc.year) {
+    const m = String(doc.year).match(/\b(19\d\d|20\d\d)\b/);
+    if (m) return m[1];
+  }
+  if (doc.date) {
+    const m = String(doc.date).match(/\b(19\d\d|20\d\d)\b/);
+    if (m) return m[1];
+  }
+  if (doc.publicdate) {
+    const m = String(doc.publicdate).match(/\b(19\d\d|20\d\d)\b/);
+    if (m) return m[1];
+  }
+  if (doc.title) {
+    const m = String(doc.title).match(/\b(19\d\d|20\d\d)\b/);
+    if (m) return m[1];
+  }
+  return 'Unknown Year';
+}
+
 async function searchArchiveOrg(query) {
   const results = [];
   try {
@@ -18,7 +49,7 @@ async function searchArchiveOrg(query) {
     for (let page = 1; page <= SEARCH_MAX_PAGES; page++) {
       if ((page - 1) * SEARCH_ROWS >= numFound) break;
 
-      const url = `https://archive.org/advancedsearch.php?q=${encodedQuery}&fl[]=identifier,title,description,downloads,item_size,year&rows=${SEARCH_ROWS}&page=${page}&output=json`;
+      const url = `https://archive.org/advancedsearch.php?q=${encodedQuery}&fl[]=identifier,title,description,downloads,item_size,year,date,publicdate&rows=${SEARCH_ROWS}&page=${page}&output=json`;
       const response = await axios.get(url, { timeout: 30000 });
       const docs = response.data?.response?.docs || [];
       numFound = response.data?.response?.numFound || docs.length;
@@ -29,8 +60,9 @@ async function searchArchiveOrg(query) {
         source: 'Archive.org',
         description: doc.description || '',
         downloads: doc.downloads || 0,
-        size: doc.item_size || 'Unknown Size',
-        year: doc.year || 'Unknown Year',
+        size: doc.item_size ? formatBytes(doc.item_size) : 'Unknown Size',
+        rawSize: doc.item_size || 0,
+        year: extractDocYear(doc),
         thumbnail: `https://archive.org/services/img/${doc.identifier}`
       })));
 

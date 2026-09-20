@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import styles from "./DownloadsSection.module.css";
+import { formatNumericBytes } from "@/utils/formatters";
 
 interface HistoryItem {
   id: string;
@@ -22,8 +23,7 @@ interface LiveItem extends HistoryItem {
 }
 
 function formatBytes(bytes: number, decimals = 2): string {
-  if (!bytes) return "0 MB";
-  return `${(bytes / 1048576).toFixed(decimals)} MB`;
+  return formatNumericBytes(bytes, decimals);
 }
 
 function formatSpeed(speed: number): string {

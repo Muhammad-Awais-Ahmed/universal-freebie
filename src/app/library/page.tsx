@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import styles from "./page.module.css";
+import { formatBytes, formatNumericBytes } from "@/utils/formatters";
 
 type Tab = "installed" | "downloads" | "browse";
 
@@ -107,7 +108,7 @@ export default function LibraryPage() {
                       <h4>{game.name}</h4>
                       <p>{game.executablePath}</p>
                     </div>
-                    {game.size && <span className={styles.listSize}>{game.size}</span>}
+                    {game.size && <span className={styles.listSize}>{formatBytes(game.size)}</span>}
                   </div>
                 ))}
               </div>
@@ -132,7 +133,7 @@ export default function LibraryPage() {
                     </div>
                     <div className={styles.listInfo}>
                       <h4>{item.filename}</h4>
-                      <p>{item.source} • {(item.totalBytes / 1048576).toFixed(1)} MB</p>
+                      <p>{item.source} • {formatNumericBytes(item.totalBytes)}</p>
                     </div>
                     <div className={styles.listActions}>
                       {item.status === "error" && (

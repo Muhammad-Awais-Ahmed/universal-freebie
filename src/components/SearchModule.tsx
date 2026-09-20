@@ -17,6 +17,7 @@ export default function SearchModule({
   hasSearched,
   emptyTitle,
   emptyText,
+  toolbar,
   children,
 }: {
   title: string;
@@ -32,6 +33,7 @@ export default function SearchModule({
   hasSearched: boolean;
   emptyTitle?: string;
   emptyText?: string;
+  toolbar?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -86,6 +88,9 @@ export default function SearchModule({
             <div className={styles.spinner} />
             <p>Scraping sources for {searchQuery}...</p>
           </div>
+        )}
+        {!isSearching && hasSearched && toolbar && (
+          <div className={styles.toolbarWrapper}>{toolbar}</div>
         )}
         {!isSearching && hasSearched && React.Children.count(children) > 0 && (
           <div className={styles.grid}>{children}</div>

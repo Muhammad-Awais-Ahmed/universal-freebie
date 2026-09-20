@@ -33,6 +33,12 @@ async function searchSteamUnlocked(query) {
         const imgElem = $(element).find('.cover-item-image img');
         const thumbnail = imgElem.attr('src') || imgElem.attr('data-src');
 
+        let year = 'Unknown Year';
+        const yearMatch = title.match(/\b(19\d\d|20\d\d)\b/);
+        if (yearMatch) {
+          year = yearMatch[1];
+        }
+
         seen.add(link);
         pageCount++;
         results.push({
@@ -40,6 +46,7 @@ async function searchSteamUnlocked(query) {
           title: title,
           source: 'SteamUnlocked',
           description: 'Pre-installed PC Game',
+          year: year,
           thumbnail: thumbnail || 'https://steamunlocked.org/wp-content/uploads/2025/10/SteamUnlocked.png',
           url: link
         });

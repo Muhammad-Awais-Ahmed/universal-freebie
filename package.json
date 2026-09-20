@@ -10,8 +10,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "electron": "set NODE_ENV=development && electron .",
-    "electron:dev": "concurrently \"next dev\" \"wait-on http://localhost:3000 && set NODE_ENV=development && electron .\"",
+    "electron": "set NODE_ENV=development&& electron .",
+    "electron:dev": "concurrently \"next dev\" \"wait-on http://localhost:3000 && set NODE_ENV=development&& electron .\"",
     "package": "next build && electron-builder --win",
     "package:dir": "next build && electron-builder --dir"
   },

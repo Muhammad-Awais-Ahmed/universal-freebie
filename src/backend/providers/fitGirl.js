@@ -30,13 +30,23 @@ async function searchFitGirl(query) {
         const link = titleElem.attr('href');
         if (!title || !link || seen.has(link)) return;
 
-        const date = $(element).find('time.entry-date').text().trim();
+        const dateElem = $(element).find('time.entry-date');
+        const date = dateElem.text().trim();
+        const datetimeAttr = dateElem.attr('datetime') || '';
         const description = $(element).find('.entry-summary p').text().trim();
 
         let size = 'Unknown';
         const sizeMatch = description.match(/Repack Size:\s*(.+?)\s*\[/i) || description.match(/Repack Size:\s*(.+)/i);
         if (sizeMatch && sizeMatch[1]) {
           size = sizeMatch[1].trim();
+        }
+
+        let year = 'Unknown Year';
+        const yearMatch = (datetimeAttr || date || '').match(/\b(19\d\d|20\d\d)\b/) || title.match(/\b(19\d\d|20\d\d)\b/);
+        if (yearMatch) {
+          year = yearMatch[1];
+        } else if (date) {
+          year = date;
         }
 
         seen.add(link);
@@ -47,7 +57,7 @@ async function searchFitGirl(query) {
           source: 'FitGirl',
           description: description,
           size: size,
-          year: date,
+          year: year,
           thumbnail: 'https://fitgirl-repacks.site/wp-content/uploads/2016/08/cropped-icon-192x192.jpg',
           url: link
         });

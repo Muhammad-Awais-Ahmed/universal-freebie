@@ -197,3 +197,190 @@
   margin: 0;
   font-size: 14px;
 }
+
+.toolbarWrapper {
+  margin-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 12px 18px;
+  backdrop-filter: blur(10px);
+}
+
+.toolbarStats {
+  color: #94a3b8;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.toolbarStats strong {
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+.activeFilterBadge {
+  background: rgba(100, 255, 218, 0.12);
+  border: 1px solid rgba(100, 255, 218, 0.3);
+  color: #64ffda;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.clearBtn {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: #f87171;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.clearBtn:hover {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: #ef4444;
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.toolbarControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.controlGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.controlLabel {
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.selectDropdown {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #f1f5f9;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  max-width: 200px;
+}
+
+.selectDropdown:hover,
+.selectDropdown:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.selectDropdown option {
+  background: #0f172a;
+  color: #f1f5f9;
+  padding: 6px;
+}
+
+.selectDropdown optgroup {
+  background: #1e293b;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.quickChips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.quickChipLabel {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 500;
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+.quickChip {
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+}
+
+.quickChip:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #e2e8f0;
+  background: rgba(30, 41, 59, 0.7);
+}
+
+.quickChipActive {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: #3b82f6;
+  color: #60a5fa;
+  font-weight: 600;
+}
+
+.quickChipCount {
+  font-size: 10px;
+  opacity: 0.75;
+  margin-left: 4px;
+}
+
+.resetBtn {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border: none;
+  color: #fff;
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-top: 14px;
+  transition: all 0.2s;
+}
+
+.resetBtn:hover {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  transform: scale(1.02);
+}
+

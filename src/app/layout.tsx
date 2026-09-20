@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import "./globals.css";
 import DownloadManager from "@/components/DownloadManager";
 import NavLink from "@/components/NavLink";
-import ConsentModal from "@/components/ConsentModal";
-import MonitorBadge from "@/components/MonitorBadge";
 
 export const metadata: Metadata = {
   title: "Universal Freebie",
@@ -43,8 +41,6 @@ export default function RootLayout({
           {children}
         </main>
         <DownloadManager />
-        <MonitorBadge />
-        <ConsentModal />
       </body>
     </html>
   );

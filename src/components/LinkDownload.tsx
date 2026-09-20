@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import styles from "./LinkDownload.module.css";
+import { Link2, Video, Zap, Info, CheckCircle2, AlertCircle, DownloadCloud, Loader2 } from "lucide-react";
 
 const QUALITY_OPTIONS = [
   { value: "1080", label: "1080p Full HD (Recommended)", hint: "Crisp Full HD with great audio. Best quality-to-size balance." },
@@ -80,11 +81,13 @@ export default function LinkDownload() {
   return (
     <div className={styles.panel}>
       <div className={styles.header}>
-        <span className={styles.icon}>{isMediaUrl ? "🎬" : "🔗"}</span>
+        <div className={styles.iconWrapper}>
+          {isMediaUrl ? <Video className="w-5 h-5 text-purple-400" /> : <Link2 className="w-5 h-5 text-purple-400" />}
+        </div>
         <div>
-          <h3 className={styles.title}>Download by Link</h3>
+          <h3 className={styles.title}>Direct Link &amp; Stream Downloader</h3>
           <p className={styles.subtitle}>
-            Paste any direct file URL or YouTube link to download it through the app.
+            Paste any direct game zip URL or video link to accelerate download through the client.
           </p>
         </div>
       </div>
@@ -93,7 +96,7 @@ export default function LinkDownload() {
         <input
           type="text"
           className={styles.input}
-          placeholder="https://example.com/file.zip or https://youtube.com/watch?v=..."
+          placeholder="https://example.com/game.zip or https://youtube.com/watch?v=..."
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => {
@@ -106,8 +109,8 @@ export default function LinkDownload() {
         <div className={styles.qualityBox}>
           <div className={styles.qualityTopRow}>
             <span className={styles.qualityLabel}>
-              <span>⚡</span>
-              <span>{isYouTube ? "YouTube Video Detected" : "Media Video Detected"} — Choose Quality</span>
+              <Zap className="w-4 h-4 text-cyan-400" />
+              <span>{isYouTube ? "YouTube Stream Detected" : "Media Stream Detected"} — Target Quality</span>
             </span>
           </div>
 
@@ -140,7 +143,7 @@ export default function LinkDownload() {
           </div>
 
           <div className={styles.qualityHint}>
-            <span>ℹ️</span>
+            <Info className="w-3.5 h-3.5 text-cyan-400" />
             <span>{currentHint}</span>
           </div>
         </div>
@@ -150,7 +153,7 @@ export default function LinkDownload() {
         <input
           type="text"
           className={styles.input}
-          placeholder="Save as (optional, e.g. video.mp4 or game.zip)"
+          placeholder="Save as custom filename (optional, e.g. cyberpunk_patch.zip)"
           value={filename}
           onChange={(e) => setFilename(e.target.value)}
           onKeyDown={(e) => {
@@ -162,26 +165,36 @@ export default function LinkDownload() {
           onClick={handleDownload}
           disabled={busy || !url.trim()}
         >
-          {busy
-            ? "Starting..."
-            : isMediaUrl
-            ? quality === "audio"
-              ? "Download MP3 Audio"
-              : quality === "best"
-              ? "Download Max Quality"
-              : `Download ${quality}p Video`
-            : "Download"}
+          {busy ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" /> Starting…
+            </>
+          ) : (
+            <>
+              <DownloadCloud className="w-4 h-4" />
+              {isMediaUrl
+                ? quality === "audio"
+                  ? "Grab Audio"
+                  : `Download ${quality}p`
+                : "Start Download"}
+            </>
+          )}
         </button>
       </div>
 
       {message && (
-        <p
+        <div
           className={`${styles.msg} ${
             message.type === "ok" ? styles.msgOk : styles.msgErr
           }`}
         >
-          {message.text}
-        </p>
+          {message.type === "ok" ? (
+            <CheckCircle2 className="w-4 h-4" />
+          ) : (
+            <AlertCircle className="w-4 h-4" />
+          )}
+          <span>{message.text}</span>
+        </div>
       )}
     </div>
   );

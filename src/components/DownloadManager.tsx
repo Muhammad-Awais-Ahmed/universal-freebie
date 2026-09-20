@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import styles from "./DownloadManager.module.css";
 import { formatNumericBytes } from "@/utils/formatters";
+import { DownloadCloud, ChevronDown, ChevronUp, Square, RotateCcw, X } from "lucide-react";
 
 interface DownloadItem {
   id: string;
@@ -105,15 +106,23 @@ export default function DownloadManager() {
     <div className={`${styles.container} ${isVisible ? styles.visible : ""}`}>
       <div className={styles.header} onClick={() => setIsVisible(!isVisible)}>
         <h3 className={styles.title}>
-          <span className={styles.icon}>⬇️</span>
-          Downloads ({activeCount} Active)
+          <span className={styles.icon}>
+            <DownloadCloud className="w-4 h-4 text-red-500" />
+          </span>
+          <span>Downloads</span>
+          {activeCount > 0 && (
+            <span className={styles.badgeActive}>{activeCount} ACTIVE</span>
+          )}
         </h3>
-        <button className={styles.toggleBtn}>{isVisible ? "▼" : "▲"}</button>
+        <button className={styles.toggleBtn} title={isVisible ? "Minimize" : "Expand"}>
+          {isVisible ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+        </button>
       </div>
+
       {isVisible && (
         <div className={styles.list}>
           {filtered.length === 0 ? (
-            <div className={styles.empty}>No active downloads</div>
+            <div className={styles.empty}>No active downloads in queue</div>
           ) : (
             filtered.map((item) => (
               <div key={item.id} className={styles.downloadItem}>
@@ -125,12 +134,14 @@ export default function DownloadManager() {
                     {getStatusText(item)}
                   </div>
                 </div>
+
                 <div className={styles.progressContainer}>
                   <div
                     className={`${styles.progressBar} ${styles[item.status] || ""}`}
                     style={{ width: `${item.progress}%` }}
                   />
                 </div>
+
                 <div className={styles.itemDetails}>
                   <span className={styles.sizeInfo}>
                     {formatBytes(item.downloadedBytes)} / {formatBytes(item.totalBytes)}
@@ -144,7 +155,7 @@ export default function DownloadManager() {
                           invoke("cancel-download", item.id);
                         }}
                       >
-                        ✕ Cancel
+                        <Square className="w-3 h-3" /> Stop
                       </button>
                     )}
                     {item.status === "error" && (
@@ -155,7 +166,7 @@ export default function DownloadManager() {
                           invoke("resume-download", item.id);
                         }}
                       >
-                        🔄 Retry
+                        <RotateCcw className="w-3 h-3" /> Retry
                       </button>
                     )}
                     {(item.status === "error" || item.status === "completed") && (
@@ -166,7 +177,7 @@ export default function DownloadManager() {
                           invoke("remove-download", item.id);
                         }}
                       >
-                        ✕
+                        <X className="w-3 h-3" />
                       </button>
                     )}
                   </div>

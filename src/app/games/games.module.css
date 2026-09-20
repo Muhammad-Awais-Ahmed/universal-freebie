@@ -1,0 +1,94 @@
+.pageWrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding-bottom: 100px;
+}
+
+/* ─── Downloader panel wrapper ─── */
+.downloaderWrap {
+  padding: 24px 28px 0;
+}
+
+/* ─── Section shared ─── */
+.section {
+  padding: 24px 28px 0;
+}
+
+.sectionTitle {
+  font-family: var(--font-gaming);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #94a3b8;
+  margin: 0 0 14px;
+}
+
+/* ─── Featured Sources Grid ─── */
+.sourcesGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.sourceCard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--src-bg, rgba(124,58,237,0.08));
+  border: 1px solid var(--src-border, rgba(124,58,237,0.2));
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
+  text-align: left;
+  width: 100%;
+}
+
+.sourceCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+  border-color: var(--src-color, #7c3aed);
+  background: rgba(255,255,255,0.04);
+}
+
+.sourceIcon {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--src-bg, rgba(124,58,237,0.1));
+  border: 1px solid var(--src-border, rgba(124,58,237,0.25));
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.sourceInfo { flex: 1; min-width: 0; }
+
+.sourceName {
+  font-family: var(--font-gaming);
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.sourceDesc {
+  font-size: 10px;
+  color: #4a5a72;
+}
+
+/* ─── Search wrapper ─── */
+.searchWrap {
+  padding: 0;
+  flex: 1;
+}
+
+@media (max-width: 700px) {
+  .sourcesGrid { grid-template-columns: 1fr; }
+  .downloaderWrap, .section { padding-left: 16px; padding-right: 16px; }
+}

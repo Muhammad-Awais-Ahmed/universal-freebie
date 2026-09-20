@@ -2,6 +2,7 @@
 
 import styles from "./GameCard.module.css";
 import { formatBytes, formatYearDisplay, getSizeTooltip } from "@/utils/formatters";
+import { DownloadCloud, HardDrive, Calendar, Gamepad2 } from "lucide-react";
 
 interface Game {
   id: string;
@@ -12,6 +13,14 @@ interface Game {
   year?: string | number;
   thumbnail?: string;
   url?: string;
+}
+
+function getSourceClass(source: string): string {
+  const s = (source || "").toLowerCase();
+  if (s.includes("fitgirl")) return styles.badgeFitgirl;
+  if (s.includes("archive")) return styles.badgeArchive;
+  if (s.includes("steam")) return styles.badgeSteamunlocked;
+  return styles.badgeDefault;
 }
 
 export default function GameCard({
@@ -33,35 +42,47 @@ export default function GameCard({
           alt={game.title}
           className={styles.image}
           onError={(e) => {
+            // Clean gaming controller SVG placeholder (no emoji)
             (e.target as HTMLImageElement).src =
-              "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%231e293b' width='100' height='100'/><text x='50' y='55' text-anchor='middle' fill='%2364748b' font-size='32'>🎮</text></svg>";
+              "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='%230e1220'><rect width='100' height='100'/><path d='M30 40h40a15 15 0 0 1 15 15v10a10 10 0 0 1-18 6l-5-7H38l-5 7a10 10 0 0 1-18-6V55a15 15 0 0 1 15-15z' fill='%231e263d'/><circle cx='38' cy='52' r='3' fill='%238b5cf6'/><circle cx='62' cy='52' r='3' fill='%2306b6d4'/></svg>";
           }}
         />
-        <div className={styles.sourceBadge}>{game.source}</div>
+        <div className={styles.imageOverlay} />
+        <div className={`${styles.sourceBadge} ${getSourceClass(game.source)}`}>
+          {game.source}
+        </div>
       </div>
+
       <div className={styles.content}>
         <h3 className={styles.title} title={game.title}>
           {game.title}
         </h3>
+
         <div className={styles.meta}>
           {game.size && (
-            <span className={styles.tag} title={sizeTooltip}>
-              Size: {formattedSize}
+            <span className={`${styles.tag} ${styles.tagBlue}`} title={sizeTooltip}>
+              <HardDrive className="w-3 h-3" />
+              {formattedSize}
             </span>
           )}
           {game.year && (
-            <span className={styles.tag}>Year: {formattedYear}</span>
+            <span className={`${styles.tag} ${styles.tagRed}`}>
+              <Calendar className="w-3 h-3" />
+              {formattedYear}
+            </span>
           )}
         </div>
+
         <p className={styles.description}>
-          {game.description || "No description available."}
+          {game.description || "Pre-indexed verified game release package ready for high-speed download."}
         </p>
+
         <button
           className={styles.downloadBtn}
           onClick={() => onDownload(game)}
         >
-          <span className={styles.btnIcon}>⬇️</span>
-          Download
+          <DownloadCloud className="w-4 h-4" />
+          Download Game
         </button>
       </div>
     </div>

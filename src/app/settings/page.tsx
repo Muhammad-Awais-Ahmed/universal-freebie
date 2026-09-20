@@ -2,6 +2,17 @@
 
 import { useState, useEffect } from "react";
 import styles from "./page.module.css";
+import {
+  FolderOpen,
+  SlidersHorizontal,
+  Network,
+  RefreshCw,
+  Zap,
+  CheckCircle2,
+  Save,
+  Loader2,
+  HardDrive
+} from "lucide-react";
 
 interface ProxyStatus {
   enabled: boolean;
@@ -114,15 +125,21 @@ export default function SettingsPage() {
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <h1 className={styles.title}>Settings</h1>
-        <p className={styles.subtitle}>Configure download and application settings</p>
+        <h1 className={styles.title}>System Settings</h1>
+        <p className={styles.subtitle}>
+          Configure storage destinations, chunk concurrency, and multi-source peer acceleration.
+        </p>
       </div>
 
       <div className={styles.sections}>
+        {/* Storage Location */}
         <div className={styles.section}>
-          <h2 className={styles.sectionTitle}>📁 Download Location</h2>
+          <h2 className={styles.sectionTitle}>
+            <HardDrive className="w-4 h-4 text-red-500" />
+            Storage Destination
+          </h2>
           <div className={styles.field}>
-            <label className={styles.label}>Download Directory</label>
+            <label className={styles.label}>Game Download Directory</label>
             <div className={styles.inputRow}>
               <input
                 type="text"
@@ -131,17 +148,22 @@ export default function SettingsPage() {
                 readOnly
               />
               <button className={styles.browseBtn} onClick={chooseFolder}>
+                <FolderOpen className="w-3.5 h-3.5" />
                 Browse
               </button>
             </div>
           </div>
         </div>
 
+        {/* Download Concurrency */}
         <div className={styles.section}>
-          <h2 className={styles.sectionTitle}>⚡ Download Settings</h2>
+          <h2 className={styles.sectionTitle}>
+            <SlidersHorizontal className="w-4 h-4 text-blue-500" />
+            Chunk & Connection Tuning
+          </h2>
           <div className={styles.field}>
             <label className={styles.label}>
-              Max Concurrent Downloads: {maxConcurrent}
+              Max Concurrent Downloads: <span className="text-red-400 font-mono font-bold">{maxConcurrent}</span>
             </label>
             <input
               type="range"
@@ -154,7 +176,7 @@ export default function SettingsPage() {
           </div>
           <div className={styles.field}>
             <label className={styles.label}>
-              Download Chunks (per file): {maxChunks}
+              Parallel Chunks Per File: <span className="text-blue-400 font-mono font-bold">{maxChunks}</span>
             </label>
             <input
               type="range"
@@ -168,22 +190,26 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* Proxy Peer Acceleration */}
         <div className={styles.section}>
-          <h2 className={styles.sectionTitle}>🌐 Proxy Pool (Parallel Peers)</h2>
+          <h2 className={styles.sectionTitle}>
+            <Network className="w-4 h-4 text-red-500" />
+            Proxy Pool (Multi-Peer Acceleration)
+          </h2>
           <div className={styles.field}>
-            <label className={styles.label}>
+            <label className={`${styles.label} flex items-center cursor-pointer select-none`}>
               <input
                 type="checkbox"
                 checked={proxyPoolEnabled}
                 onChange={(e) => setProxyPoolEnabled(e.target.checked)}
-                style={{ marginRight: 8, transform: "scale(1.3)" }}
+                className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-red-600 focus:ring-red-500 mr-2.5"
               />
-              Enable free proxy pool from GitHub
+              <span className="text-slate-100 font-medium">
+                Enable free GitHub open-source proxy pool
+              </span>
             </label>
             <p className={styles.monitorNote}>
-              Downloads free public proxies from 12+ open-source GitHub repositories, tests them with tiny ping requests, and routes
-              download chunks through the fastest working ones — acting as extra parallel
-              peers for much higher download speed.
+              Automatically aggregates public HTTP/SOCKS endpoints, pings them with ultra-low latency test probes, and routes file chunk requests through fast peers in parallel.
             </p>
           </div>
 
@@ -195,7 +221,7 @@ export default function SettingsPage() {
               </div>
               <div className={styles.proxyMetricLabel}>GitHub Pool</div>
               <div className={styles.proxyMetricSublabel}>
-                {proxyStatus?.inReserve ? `${proxyStatus.inReserve.toLocaleString()} in reserve` : "Total loaded"}
+                {proxyStatus?.inReserve ? `${proxyStatus.inReserve.toLocaleString()} reserve` : "Total loaded"}
               </div>
             </div>
 
@@ -209,7 +235,7 @@ export default function SettingsPage() {
               </div>
               <div className={styles.proxyMetricLabel}>Tested Batch</div>
               <div className={styles.proxyMetricSublabel}>
-                {proxyStatus ? `${proxyStatus.workingCount} live + ${proxyStatus.staleRemoved} dead` : "Ping evaluated"}
+                {proxyStatus ? `${proxyStatus.workingCount} live + ${proxyStatus.staleRemoved} dead` : "Evaluated"}
               </div>
             </div>
 
@@ -217,16 +243,16 @@ export default function SettingsPage() {
               <div className={`${styles.proxyMetricVal} ${proxyStatus && proxyStatus.workingCount > 0 ? styles.proxyMetricValSuccess : ""}`}>
                 {proxyStatus?.workingCount || 0}
               </div>
-              <div className={styles.proxyMetricLabel}>Verified Working</div>
-              <div className={styles.proxyMetricSublabel}>Active fast peers</div>
+              <div className={styles.proxyMetricLabel}>Verified Fast</div>
+              <div className={styles.proxyMetricSublabel}>Active peers</div>
             </div>
 
             <div className={styles.proxyMetricCard}>
               <div className={`${styles.proxyMetricVal} ${proxyStatus && proxyStatus.staleRemoved > 0 ? styles.proxyMetricValWarn : ""}`}>
                 {proxyStatus?.staleRemoved || 0}
               </div>
-              <div className={styles.proxyMetricLabel}>Stale Removed</div>
-              <div className={styles.proxyMetricSublabel}>Timed out / dead</div>
+              <div className={styles.proxyMetricLabel}>Pruned Stale</div>
+              <div className={styles.proxyMetricSublabel}>Timed out</div>
             </div>
 
             <div className={styles.proxyMetricCard}>
@@ -248,7 +274,15 @@ export default function SettingsPage() {
               onClick={refreshProxyPool}
               disabled={refreshingProxies || validatingProxies || !proxyPoolEnabled}
             >
-              {refreshingProxies ? "⏳ Fetching from GitHub…" : "🌐 Fetch & Refresh from GitHub"}
+              {refreshingProxies ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Fetching GitHub…
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5" /> Fetch & Refresh Pool
+                </>
+              )}
             </button>
 
             <button
@@ -257,7 +291,15 @@ export default function SettingsPage() {
               onClick={validateProxyPool}
               disabled={refreshingProxies || validatingProxies || !proxyPoolEnabled}
             >
-              {validatingProxies ? "⚡ Validating & Pruning…" : "⚡ Validate Proxies & Remove Stale"}
+              {validatingProxies ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Validating…
+                </>
+              ) : (
+                <>
+                  <Zap className="w-3.5 h-3.5" /> Validate & Prune Stale
+                </>
+              )}
             </button>
           </div>
 
@@ -271,13 +313,13 @@ export default function SettingsPage() {
               ? `Last validated: ${new Date(proxyStatus.lastValidated).toLocaleTimeString()}`
               : proxyStatus?.totalLoaded
               ? "Proxies loaded. Click Validate to prune stale ones."
-              : "Click 'Fetch & Refresh from GitHub' to load free open-source proxies."}
+              : "Click 'Fetch & Refresh Pool' to load free open-source proxies."}
           </div>
 
           {/* Top Working Proxies Preview */}
           {proxyStatus && proxyStatus.proxies && proxyStatus.proxies.length > 0 && (
             <div className={styles.proxyChipsContainer}>
-              <div className={styles.proxyChipsTitle}>Top Verified Fast Proxies</div>
+              <div className={styles.proxyChipsTitle}>Verified Low-Latency Peer Nodes</div>
               <div className={styles.proxyChipsList}>
                 {proxyStatus.proxies.map((p, idx) => (
                   <div key={idx} className={styles.proxyChip}>
@@ -300,12 +342,21 @@ export default function SettingsPage() {
           )}
         </div>
 
+        {/* Save Settings Trigger */}
         <button
           className={styles.saveBtn}
           onClick={saveSettings}
           disabled={saving}
         >
-          {saving ? "Saving..." : "Save Settings"}
+          {saving ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" /> Saving Configuration…
+            </>
+          ) : (
+            <>
+              <Save className="w-4 h-4" /> Save System Settings
+            </>
+          )}
         </button>
       </div>
     </div>

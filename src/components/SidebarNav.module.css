@@ -1,0 +1,144 @@
+/* ─── Sidebar Shell ─── */
+.sidebar {
+  position: fixed;
+  left: 0; top: 0; bottom: 0;
+  width: 130px;
+  background: #0d0f1a;
+  border-right: 1px solid rgba(255,255,255,0.04);
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  -webkit-app-region: drag;
+}
+
+/* ─── Brand ─── */
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 18px 10px 14px;
+  gap: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  -webkit-app-region: drag;
+}
+
+.logoImg {
+  width: 100%;
+  max-width: 90px;
+  height: auto;
+  display: block;
+  border-radius: 8px;
+  mix-blend-mode: screen;
+}
+
+/* ─── Nav ─── */
+.nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 6px;
+  gap: 3px;
+  -webkit-app-region: no-drag;
+}
+
+.navLink {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 8px;
+  border-radius: 10px;
+  color: #4a5a7a;
+  text-decoration: none;
+  transition: all 0.18s ease;
+  overflow: hidden;
+}
+
+.navLink:hover {
+  color: #a0aec0;
+  background: rgba(255,255,255,0.04);
+}
+
+/* Active state — full-width purple fill like reference */
+.navLinkActive {
+  background: #7c3aed;
+  color: #ffffff !important;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(124,58,237,0.45);
+}
+
+.navLinkActive:hover {
+  background: #8b5cf6;
+}
+
+.navIcon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  transition: color 0.18s;
+}
+
+.navLabel {
+  font-family: var(--font-gaming);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-transform: uppercase;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* ─── Bottom Status ─── */
+.bottom {
+  padding: 10px 8px 14px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+  -webkit-app-region: no-drag;
+}
+
+.statusBadge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 6px;
+  background: rgba(124,58,237,0.08);
+  border: 1px solid rgba(124,58,237,0.2);
+  border-radius: 8px;
+  cursor: default;
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22d3ee;
+  box-shadow: 0 0 6px #22d3ee;
+  animation: pulseGlow 2s infinite;
+  flex-shrink: 0;
+}
+
+.statusRow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.statusTitle {
+  font-family: var(--font-gaming);
+  font-size: 7px;
+  font-weight: 700;
+  color: #7c3aed;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.statusSub {
+  font-family: var(--font-mono);
+  font-size: 6.5px;
+  color: #334155;
+  text-align: center;
+  line-height: 1.4;
+}

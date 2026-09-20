@@ -1,37 +1,54 @@
 import styles from "./page.module.css";
 import DownloadsSection from "@/components/DownloadsSection";
+import { DownloadCloud, Library, Layers, Zap, ShieldCheck } from "lucide-react";
 
 export default function HomePage() {
   return (
     <div className={styles.page}>
-      <div className={styles.hero}>
+
+      {/* ═══ Hero ═══ */}
+      <section className={styles.hero}>
+        <div className={styles.heroGlow} />
+
         <div className={styles.content}>
-          <h1 className={styles.title}>
-            Universal
-            <br />
-            <span className={styles.accent}>Freebie</span>
+          <h1 className={styles.heroTitle}>
+            YOUR ULTIMATE
+            <span className={styles.heroAccent}>GAME HUB</span>
           </h1>
-          <p className={styles.subtitle}>
-            Download free games from multiple sources. Search, download, and manage
-            your library all in one place.
+
+          <p className={styles.heroSub}>
+            Search, download and launch your favorite games<br />
+            from multiple sources — all in one place.
           </p>
-          <div className={styles.actions}>
-            <a href="/games" className={styles.primaryBtn}>
-              Browse Games
+
+          {/* CTA Buttons */}
+          <div className={styles.ctas}>
+            <a href="/games" className={styles.ctaPrimary}>
+              <div className={styles.ctaIcon}>
+                <DownloadCloud style={{ width: 15, height: 15 }} />
+              </div>
+              <div>
+                <div className={styles.ctaTitle}>Browse Games</div>
+                <div className={styles.ctaSub}>Explore and download your favorite games</div>
+              </div>
+              <span className={styles.ctaArrow}>›</span>
+            </a>
+
+            <a href="/library" className={styles.ctaSecondary}>
+              <div className={styles.ctaIcon}>
+                <Library style={{ width: 15, height: 15, color: "#7c3aed" }} />
+              </div>
+              <div>
+                <div className={styles.ctaTitle}>MY Library</div>
+                <div className={styles.ctaSub}>View your installed games</div>
+              </div>
+              <span className={styles.ctaArrow}>›</span>
             </a>
           </div>
-          <div className={styles.stats}>
-            <div className={styles.statItem}>
-              <div className={styles.statNumber}>4</div>
-              <div className={styles.statLabel}>Sources</div>
-            </div>
-            <div className={styles.statItem}>
-              <div className={styles.statNumber}>1000+</div>
-              <div className={styles.statLabel}>Games</div>
-            </div>
-          </div>
         </div>
-      </div>
+      </section>
+
+      {/* ═══ Recent Downloads ═══ */}
       <DownloadsSection />
     </div>
   );

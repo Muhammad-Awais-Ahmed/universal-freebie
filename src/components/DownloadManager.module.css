@@ -1,19 +1,19 @@
 .container {
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(16px);
   color: #fff;
   z-index: 9999;
-  background: rgba(15, 23, 42, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(10, 12, 18, 0.96);
+  border: 1px solid #1c2233;
   border-bottom: none;
-  border-radius: 16px 16px 0 0;
-  width: 380px;
-  font-family: Inter, -apple-system, sans-serif;
-  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  border-radius: 14px 14px 0 0;
+  width: 420px;
+  font-family: var(--font-sans);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   position: fixed;
   bottom: 0;
-  right: 20px;
-  transform: translateY(calc(100% - 50px));
-  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
+  right: 24px;
+  transform: translateY(calc(100% - 48px));
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.7), 0 0 20px rgba(239, 68, 68, 0.15);
 }
 
 .container.visible {
@@ -22,36 +22,57 @@
 
 .header {
   cursor: pointer;
-  background: linear-gradient(rgba(255, 255, 255, 0.05) 0%, transparent 100%);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 16px 16px 0 0;
+  background: rgba(14, 18, 28, 0.92);
+  border-bottom: 1px solid #1a2030;
+  border-radius: 14px 14px 0 0;
   justify-content: space-between;
   align-items: center;
-  height: 50px;
-  padding: 0 20px;
+  height: 48px;
+  padding: 0 16px;
   display: flex;
+  user-select: none;
 }
 
 .title {
   align-items: center;
   gap: 8px;
   margin: 0;
-  font-size: 14px;
-  font-weight: 600;
+  font-family: var(--font-gaming);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   display: flex;
+  color: #ffffff;
 }
 
 .icon {
-  font-size: 16px;
+  color: #ef4444;
+  display: flex;
+  align-items: center;
+}
+
+.badgeActive {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(124,58,237,0.15);
+  border: 1px solid rgba(124,58,237,0.35);
+  color: #c4b5fd;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 4px;
 }
 
 .toggleBtn {
-  color: #8892b0;
+  color: #94a3b8;
   cursor: pointer;
   background: none;
   border: none;
   padding: 4px;
-  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition: color 0.2s;
 }
 
@@ -61,43 +82,42 @@
 
 .list {
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
   max-height: 400px;
-  padding: 16px;
+  padding: 14px 16px 18px;
   display: flex;
   overflow-y: auto;
 }
 
 .list::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
-
 .list::-webkit-scrollbar-track {
   background: transparent;
 }
-
 .list::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: #1c2233;
   border-radius: 3px;
 }
 
 .empty {
   text-align: center;
-  color: #8892b0;
-  padding: 20px 0;
-  font-size: 13px;
+  color: #64748b;
+  padding: 24px 0;
+  font-size: 12px;
 }
 
 .downloadItem {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 12px;
+  background: rgba(14, 18, 28, 0.85);
+  border: 1px solid #1c2233;
+  border-radius: 10px;
   padding: 12px;
-  transition: background 0.2s;
+  transition: background 0.2s, border-color 0.2s;
 }
 
 .downloadItem:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(20, 26, 40, 0.95);
+  border-color: rgba(59, 130, 246, 0.35);
 }
 
 .itemHeader {
@@ -111,42 +131,49 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 220px;
+  max-width: 240px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
+  color: #ffffff;
 }
 
 .itemStatus {
+  font-family: var(--font-mono);
   font-size: 11px;
-  color: #64ffda;
+  font-weight: 600;
+  color: #38bdf8;
 }
 
 .progressContainer {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 4px;
-  height: 4px;
+  background: #080a10;
+  border-radius: 999px;
+  height: 5px;
   overflow: hidden;
   margin-bottom: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .progressBar {
   height: 100%;
-  border-radius: 4px;
+  border-radius: 999px;
   transition: width 0.3s ease;
-  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  background: linear-gradient(90deg, #7c3aed 0%, #22d3ee 100%);
+  box-shadow: 0 0 8px rgba(124,58,237,0.5);
 }
 
 .progressBar.completed {
-  background: linear-gradient(90deg, #22c55e, #4ade80);
+  background: linear-gradient(90deg, #22d3ee 0%, #ffffff 100%);
+  box-shadow: 0 0 8px rgba(34,211,238,0.5);
 }
 
 .progressBar.error {
-  background: linear-gradient(90deg, #ef4444, #f87171);
+  background: linear-gradient(90deg, #b91c1c 0%, #ef4444 100%);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
 }
 
 .progressBar.queued {
-  background: linear-gradient(90deg, #f59e0b, #fbbf24);
-  animation: pulse 2s infinite;
+  background: linear-gradient(90deg, #5b21b6 0%, #7c3aed 100%);
+  animation: pulse 1.8s infinite;
 }
 
 @keyframes pulse {
@@ -161,42 +188,54 @@
 }
 
 .sizeInfo {
-  color: #8892b0;
+  color: #94a3b8;
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 
 .actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   align-items: center;
 }
 
 .cancelBtn {
-  color: #f87171;
+  color: #fca5a5;
   cursor: pointer;
-  background: none;
-  border: none;
-  font-size: 11px;
-  padding: 2px 6px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  font-family: var(--font-gaming);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 3px 8px;
   border-radius: 4px;
-  transition: background 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s;
 }
 
 .cancelBtn:hover {
-  background: rgba(248, 113, 113, 0.1);
+  background: rgba(239, 68, 68, 0.25);
+  color: #fff;
 }
 
 .retryBtn {
-  color: #facc15;
+  color: #c4b5fd;
   cursor: pointer;
-  background: none;
-  border: none;
-  font-size: 11px;
-  padding: 2px 6px;
+  background: rgba(124,58,237,0.12);
+  border: 1px solid rgba(124,58,237,0.25);
+  font-family: var(--font-gaming);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 3px 8px;
   border-radius: 4px;
-  transition: background 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s;
 }
 
-.retryBtn:hover {
-  background: rgba(250, 204, 21, 0.1);
-}
+.retryBtn:hover { background: rgba(124,58,237,0.25); color: #fff; }

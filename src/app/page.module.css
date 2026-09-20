@@ -2,100 +2,228 @@
   display: flex;
   flex-direction: column;
   min-height: 100%;
+  padding-bottom: 80px;
+  background: url('/hero-bg.jpg') top right no-repeat;
+  background-size: cover;
+  background-attachment: fixed;
 }
 
+/* ═══════════════════════════════════════════════════
+   Hero Section
+═══════════════════════════════════════════════════ */
 .hero {
-  min-height: calc(100vh - 300px);
+  position: relative;
+  min-height: 480px;
+  display: flex;
+  align-items: flex-start;
+  padding: 40px 36px;
+  overflow: hidden;
+}
+
+
+
+/* Purple atmospheric glow behind hero */
+.heroGlow {
+  position: absolute;
+  top: -80px;
+  right: 80px;
+  width: 600px;
+  height: 500px;
+  background: radial-gradient(ellipse,
+    rgba(124,58,237,0.25) 0%,
+    rgba(217,70,239,0.1) 35%,
+    transparent 70%);
+  filter: blur(50px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Text content */
+.content {
+  position: relative;
+  z-index: 1;
+  max-width: 500px;
+}
+
+.heroTitle {
+  font-family: var(--font-gaming);
+  font-size: 42px;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: 0.02em;
+  color: #ffffff;
+  margin: 0 0 0;
+  text-transform: uppercase;
+}
+
+/* "GAME HUB" line — cyan gradient matching reference */
+.heroAccent {
+  background: linear-gradient(90deg, #22d3ee 0%, #7c3aed 60%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  display: block;
+  font-size: 52px;
+  font-weight: 800;
+  filter: drop-shadow(0 0 18px rgba(34,211,238,0.5));
+}
+
+.heroSub {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 10px 0 20px;
+  max-width: 380px;
+}
+
+/* Feature chips row */
+.features {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+
+.featureChip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 8px;
+  padding: 7px 11px;
+}
+
+.featureIcon {
+  width: 24px;
+  height: 24px;
+  display: flex;
   align-items: center;
   justify-content: center;
-  padding: 40px 40px 10px;
-  display: flex;
+  background: rgba(124,58,237,0.2);
+  border-radius: 6px;
+  color: #7c3aed;
+  flex-shrink: 0;
 }
 
-.content {
-  text-align: center;
-  max-width: 700px;
-}
-
-.title {
-  color: #e2e8f0;
-  margin: 0 0 20px;
-  font-size: 72px;
-  font-weight: 800;
-  line-height: 1.1;
-}
-
-.accent {
-  background: linear-gradient(135deg, #f97316 0%, #eab308 100%);
-  -webkit-text-fill-color: transparent;
-  -webkit-background-clip: text;
-}
-
-.subtitle {
-  color: #94a3b8;
-  margin: 0 0 40px;
-  font-size: 18px;
-  line-height: 1.6;
-}
-
-.actions {
-  justify-content: center;
-  gap: 16px;
-  margin-bottom: 60px;
-  display: flex;
-}
-
-.primaryBtn {
-  color: #fff;
-  background: linear-gradient(135deg, #f97316 0%, #eab308 100%);
-  border-radius: 12px;
-  padding: 14px 32px;
-  font-size: 16px;
-  font-weight: 600;
-  text-decoration: none;
-  transition: all 0.2s;
-}
-
-.primaryBtn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 20px rgba(249, 115, 22, 0.3);
-}
-
-.secondaryBtn {
-  color: #e2e8f0;
-  background: rgba(30, 41, 59, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
-  padding: 14px 32px;
-  font-size: 16px;
-  font-weight: 600;
-  text-decoration: none;
-  transition: all 0.2s;
-}
-
-.secondaryBtn:hover {
-  border-color: rgba(255, 255, 255, 0.2);
-  transform: translateY(-2px);
-}
-
-.stats {
-  justify-content: center;
-  gap: 48px;
-  display: flex;
-}
-
-.statItem {
-  text-align: center;
-}
-
-.statNumber {
-  color: #e2e8f0;
-  margin-bottom: 4px;
-  font-size: 32px;
+.featureNum {
+  font-family: var(--font-gaming);
+  font-size: 11px;
   font-weight: 700;
+  color: #e2e8f0;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
 }
 
-.statLabel {
+.featureLabel {
+  font-size: 9px;
+  color: #4a5568;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* CTA Buttons — exact match reference */
+.ctas {
+  display: flex;
+  gap: 12px;
+}
+
+/* Browse Games — filled purple gradient */
+.ctaPrimary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 18px;
+  border-radius: 10px;
+  text-decoration: none;
+  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
+  border: 1px solid rgba(139,92,246,0.5);
+  box-shadow: 0 4px 20px rgba(124,58,237,0.4);
+  color: #ffffff;
+  min-width: 200px;
+  transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
+}
+
+.ctaPrimary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(124,58,237,0.6);
+  background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);
+}
+
+/* My Library — dark card */
+.ctaSecondary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 18px;
+  border-radius: 10px;
+  text-decoration: none;
+  background: rgba(14,17,28,0.9);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #e2e8f0;
+  min-width: 180px;
+  transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
+}
+
+.ctaSecondary:hover {
+  background: rgba(20,24,38,0.95);
+  border-color: rgba(124,58,237,0.4);
+  box-shadow: 0 4px 16px rgba(124,58,237,0.2);
+  transform: translateY(-2px);
+}
+
+.ctaIcon {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.1);
+  border-radius: 7px;
+  flex-shrink: 0;
+}
+
+.ctaTitle {
+  font-family: var(--font-gaming);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #ffffff;
+  text-transform: uppercase;
+}
+
+.ctaSub {
+  font-size: 9.5px;
+  color: rgba(255,255,255,0.45);
+  margin-top: 2px;
+}
+
+.ctaArrow {
+  margin-left: auto;
+  font-size: 18px;
+  color: rgba(255,255,255,0.4);
+  line-height: 1;
+}
+
+/* ═══════════════════════════════════════════════════
+   Recent Downloads Strip
+═══════════════════════════════════════════════════ */
+.recentSection {
+  padding: 0 36px 0;
+}
+
+.recentTitle {
+  font-family: var(--font-gaming);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
   color: #94a3b8;
-  font-size: 14px;
+  margin: 0 0 12px;
+}
+
+@media (max-width: 700px) {
+  .heroTitle { font-size: 28px; }
+  .heroAccent { font-size: 36px; }
+  .ctas { flex-direction: column; }
+  .ctaPrimary, .ctaSecondary { min-width: 0; }
 }

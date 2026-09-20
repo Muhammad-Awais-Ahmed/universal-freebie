@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import styles from "./DownloadsSection.module.css";
 import { formatNumericBytes } from "@/utils/formatters";
+import { DownloadCloud, Play, Square, FolderOpen, X, Loader2, HardDrive } from "lucide-react";
 
 interface HistoryItem {
   id: string;
@@ -149,24 +150,24 @@ export default function DownloadsSection() {
     <section className={styles.section} id="downloads">
       <div className={styles.heading}>
         <div>
-          <h2 className={styles.title}>
-            <span className={styles.icon}>⬇️</span> Downloads
-          </h2>
+          <div className={styles.titleWrapper}>
+            <DownloadCloud className="w-5 h-5 text-red-500" />
+            <h2 className={styles.title}>Active & Recent Downloads</h2>
+          </div>
           <p className={styles.subtitle}>
-            Every file you start is kept here. Half-downloaded files can be
-            resumed anytime.
+            Incomplete downloads are auto-preserved and can be resumed with peer acceleration.
           </p>
         </div>
         {(activeCount > 0 || partialCount > 0) && (
           <div className={styles.chips}>
             {activeCount > 0 && (
               <span className={`${styles.chip} ${styles.chipActive}`}>
-                {activeCount} active
+                {activeCount} Active
               </span>
             )}
             {partialCount > 0 && (
               <span className={`${styles.chip} ${styles.chipPartial}`}>
-                {partialCount} can continue
+                {partialCount} Incomplete
               </span>
             )}
           </div>
@@ -179,11 +180,12 @@ export default function DownloadsSection() {
         <div className={styles.empty}>Loading downloads…</div>
       ) : items.length === 0 ? (
         <div className={styles.empty}>
-          <div className={styles.emptyIcon}>📥</div>
-          <p>No downloads yet.</p>
+          <div className={styles.emptyIcon}>
+            <HardDrive className="w-10 h-10 stroke-[1.5]" />
+          </div>
+          <p>No active downloads in queue.</p>
           <p className={styles.emptySub}>
-            Search for a game or mod and hit download — it will appear here
-            instantly.
+            Search for a game and hit Download — chunk progress will track here in real time.
           </p>
         </div>
       ) : (
@@ -200,7 +202,7 @@ export default function DownloadsSection() {
                     </div>
                     <div className={styles.meta}>
                       <span className={styles.source}>
-                        {item.source || "Unknown"}
+                        {item.source || "Direct"}
                       </span>
                       <span
                         className={`${styles.status} ${
@@ -246,7 +248,7 @@ export default function DownloadsSection() {
                         className={styles.actionBtn}
                         onClick={() => cancelDownload(item.id)}
                       >
-                        ⏹ Cancel
+                        <Square className="w-3 h-3 text-rose-400" /> Cancel
                       </button>
                     )}
                     {isPartial(item) && (
@@ -255,9 +257,15 @@ export default function DownloadsSection() {
                         disabled={busyId === item.id}
                         onClick={() => continueDownload(item.id)}
                       >
-                        {busyId === item.id
-                          ? "Resuming…"
-                          : "▶ Continue Download"}
+                        {busyId === item.id ? (
+                          <>
+                            <Loader2 className="w-3 h-3 animate-spin" /> Resuming…
+                          </>
+                        ) : (
+                          <>
+                            <Play className="w-3 h-3 fill-current" /> Continue
+                          </>
+                        )}
                       </button>
                     )}
                     {item.status === "completed" && (
@@ -265,7 +273,7 @@ export default function DownloadsSection() {
                         className={styles.actionBtn}
                         onClick={() => openFile(item.filename)}
                       >
-                        📂 Open
+                        <FolderOpen className="w-3 h-3 text-cyan-400" /> Open Folder
                       </button>
                     )}
                     <button
@@ -273,7 +281,7 @@ export default function DownloadsSection() {
                       title="Remove from list"
                       onClick={() => removeDownload(item.id)}
                     >
-                      ✕
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>

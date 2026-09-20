@@ -4,20 +4,30 @@ import { useState } from "react";
 import { Volume2, VolumeX } from "lucide-react";
 import styles from "./BackgroundVideo.module.css";
 
+const playlist = [
+  "/Bg-Video.mp4",
+  "/screencracking-steve.mp4"
+];
+
 export default function BackgroundVideo() {
   const [isMuted, setIsMuted] = useState(true);
+  const [currentVideo, setCurrentVideo] = useState(0);
+
+  const handleVideoEnded = () => {
+    setCurrentVideo((prev) => (prev + 1) % playlist.length);
+  };
 
   return (
     <div className={styles.videoContainer}>
       <video
+        key={playlist[currentVideo]}
+        src={playlist[currentVideo]}
         autoPlay
-        loop
         muted={isMuted}
         playsInline
+        onEnded={handleVideoEnded}
         className={styles.video}
-      >
-        <source src="/Bg-Video.mp4" type="video/mp4" />
-      </video>
+      />
       <div className={styles.overlay} />
       <button 
         className={styles.muteBtn}

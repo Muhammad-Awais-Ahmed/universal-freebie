@@ -1,10 +1,12 @@
 import styles from "./page.module.css";
 import DownloadsSection from "@/components/DownloadsSection";
 import { DownloadCloud, Library, Layers, Zap, ShieldCheck } from "lucide-react";
+import BackgroundVideo from "@/components/BackgroundVideo";
 
 export default function HomePage() {
   return (
     <div className={styles.page}>
+      <BackgroundVideo />
 
       {/* ═══ Hero ═══ */}
       <section className={styles.hero}>

@@ -24,13 +24,13 @@ async function searchSteamUnlocked(query) {
       const $ = cheerio.load(response.data);
       let pageCount = 0;
 
-      $('.cover-item.category').each((i, element) => {
-        const titleElem = $(element).find('.cover-item-title a h2');
+      $('.su-cat__card').each((i, element) => {
+        const titleElem = $(element).find('.su-cat__card-body h2');
         const title = titleElem.text().trim();
-        const link = $(element).find('.cover-item-title a').attr('href');
+        const link = $(element).attr('href');
         if (!title || !link || seen.has(link)) return;
 
-        const imgElem = $(element).find('.cover-item-image img');
+        const imgElem = $(element).find('.su-cat__card-img img');
         const thumbnail = imgElem.attr('src') || imgElem.attr('data-src');
 
         let year = 'Unknown Year';

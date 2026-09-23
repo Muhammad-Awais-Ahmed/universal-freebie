@@ -1647,9 +1647,12 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
               document.title = 'SHOW_ME';
             }
             
-            const freeInput = document.querySelector('input[name="type"][value="free"]');
-            if (freeInput) {
-              freeInput.closest('form').submit();
+            // New UploadHaven layout: free download is a <button class="btn-submit-free">
+            // that starts as type="button" and becomes type="submit" after the
+            // countdown AND Cloudflare Turnstile both complete.
+            const freeBtn = document.querySelector('button.btn-submit-free, button[name="type"][value="free"]');
+            if (freeBtn && freeBtn.type === 'submit') {
+              freeBtn.closest('form').submit();
               return;
             }
             
@@ -1717,15 +1720,17 @@ ipcMain.handle('start-download', async (event, gameOrUrl, source, gameData) => {
       captchaWindow.webContents.on('did-finish-load', () => {
         captchaWindow.webContents.executeJavaScript(`
           setInterval(() => {
-            const finalBtn = document.querySelector('form[action*="/download/"] button');
-            const realTimer = document.querySelector('.download-timer, [id*="timer"]');
+            // New UploadHaven: the free button is type="button" during the
+            // countdown/Turnstile wait and only becomes type="submit" when ready.
+            const finalBtn = document.querySelector('form[action*="/download/"] button.btn-submit-free, form[action*="/download/"] button[name="type"][value="free"]');
+            const realTimer = document.querySelector('.download-timer-seconds, .download-timer, [id*="timer"]');
             const fakeTimer = document.getElementById('ugc-custom-timer');
             
             if (realTimer && fakeTimer && realTimer.innerText.toLowerCase().includes('wait')) {
                fakeTimer.innerText = realTimer.innerText.replace('seconds', 's');
             }
             
-            if (finalBtn && !finalBtn.disabled) {
+            if (finalBtn && finalBtn.type === 'submit' && !finalBtn.disabled) {
               if (fakeTimer) {
                  fakeTimer.innerText = 'Starting Download...';
                  fakeTimer.nextElementSibling.innerText = 'Intercepting secure URL...';

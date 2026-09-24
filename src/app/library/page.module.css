@@ -170,3 +170,272 @@
   white-space: nowrap; box-shadow: 0 2px 10px rgba(124,58,237,0.3);
 }
 .retryBtn:hover { box-shadow: 0 4px 16px rgba(124,58,237,0.55); border-color: #c4b5fd; }
+
+/* ─── Notice banner ─── */
+.notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(34, 211, 238, 0.08);
+  border: 1px solid rgba(34, 211, 238, 0.25);
+  color: #a5f3fc;
+  border-radius: 10px;
+  padding: 10px 16px;
+  margin-bottom: 18px;
+  font-size: 13px;
+}
+
+.noticeClose {
+  background: rgba(34, 211, 238, 0.15);
+  border: 1px solid rgba(34, 211, 238, 0.3);
+  color: #a5f3fc;
+  border-radius: 4px;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.noticeClose:hover { background: rgba(34, 211, 238, 0.3); color: #fff; }
+
+/* ─── List header / actions ─── */
+.listHeader {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.listHeaderActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.emptyActions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Add Game button — cyan accent */
+.addBtn {
+  color: #fff;
+  cursor: pointer;
+  background: linear-gradient(135deg, #0891b2 0%, #06b6d4 100%);
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  border-radius: 8px;
+  margin-top: 14px;
+  padding: 10px 22px;
+  font-family: var(--font-gaming);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
+  box-shadow: 0 2px 12px rgba(6, 182, 212, 0.35);
+}
+.addBtn:hover { transform: translateY(-2px); box-shadow: 0 6px 22px rgba(6, 182, 212, 0.6); border-color: #67e8f9; }
+
+/* ─── Add Game form ─── */
+.addForm {
+  background: rgba(13, 15, 26, 0.9);
+  border: 1px solid rgba(34, 211, 238, 0.2);
+  border-radius: 14px;
+  padding: 20px;
+  margin-bottom: 18px;
+  backdrop-filter: blur(8px);
+}
+
+.addFormTitle {
+  font-family: var(--font-gaming);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #67e8f9;
+  margin-bottom: 16px;
+}
+
+.addFormGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.addField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.addField span {
+  font-family: var(--font-gaming);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+}
+
+.addField input {
+  background: rgba(8, 10, 16, 0.9);
+  border: 1px solid #1f2638;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 13px;
+  padding: 9px 12px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.addField input:focus {
+  border-color: #06b6d4;
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.25);
+}
+
+.pathInputWrap {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.pathInputWrap input { flex: 1; }
+
+.browseBtn {
+  color: #67e8f9;
+  cursor: pointer;
+  background: rgba(6, 182, 212, 0.1);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-family: var(--font-gaming);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+.browseBtn:hover { background: rgba(6, 182, 212, 0.2); color: #fff; }
+
+.addFormActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.cancelBtn {
+  color: #94a3b8;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 9px 18px;
+  font-family: var(--font-gaming);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  transition: all 0.2s;
+}
+.cancelBtn:hover { color: #fff; border-color: rgba(255, 255, 255, 0.25); }
+
+.saveBtn {
+  color: #fff;
+  cursor: pointer;
+  background: linear-gradient(135deg, #0891b2 0%, #06b6d4 100%);
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  border-radius: 8px;
+  padding: 9px 18px;
+  font-family: var(--font-gaming);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+  box-shadow: 0 2px 10px rgba(6, 182, 212, 0.3);
+}
+.saveBtn:hover { box-shadow: 0 4px 16px rgba(6, 182, 212, 0.55); border-color: #67e8f9; }
+.saveBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* ─── Installed game meta row ─── */
+.listMetaRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.listSource {
+  color: #c4b5fd;
+  background: rgba(124, 58, 237, 0.1);
+  border: 1px solid rgba(124, 58, 237, 0.25);
+  border-radius: 5px;
+  padding: 2px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.listYear {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 5px;
+  padding: 2px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* Launch button — purple */
+.launchBtn {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: #fff; cursor: pointer;
+  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
+  border: 1px solid rgba(139,92,246,0.4);
+  border-radius: 6px; padding: 5px 12px;
+  font-family: var(--font-gaming); font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em; transition: all 0.2s;
+  white-space: nowrap; box-shadow: 0 2px 10px rgba(124,58,237,0.3);
+}
+.launchBtn:hover { box-shadow: 0 4px 16px rgba(124,58,237,0.55); border-color: #c4b5fd; }
+.launchBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Remove button — red ghost */
+.removeBtn {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: #fca5a5; cursor: pointer;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 6px; padding: 5px 10px;
+  font-family: var(--font-gaming); font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em; transition: all 0.2s;
+  white-space: nowrap;
+}
+.removeBtn:hover { background: rgba(239, 68, 68, 0.25); color: #fff; border-color: rgba(239, 68, 68, 0.5); }
+
+@media (max-width: 700px) {
+  .addFormGrid { grid-template-columns: 1fr; }
+  .listHeaderActions { flex-wrap: wrap; }
+}

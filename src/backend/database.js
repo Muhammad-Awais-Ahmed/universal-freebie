@@ -121,6 +121,10 @@ class Database {
       id: Date.now().toString(),
       name: game.name,
       executablePath: game.executablePath,
+      size: game.size || null,
+      year: game.year || null,
+      source: game.source || 'Manual',
+      thumbnail: game.thumbnail || null,
       dateAdded: new Date().toISOString()
     });
     this._saveData();
@@ -129,6 +133,16 @@ class Database {
   removeInstalledGame(id) {
     this.data.installedGames = this.data.installedGames.filter(g => g.id !== id);
     this._saveData();
+  }
+
+  updateInstalledGame(id, patch) {
+    const game = this.data.installedGames.find(g => g.id === id);
+    if (game) {
+      Object.assign(game, patch);
+      this._saveData();
+      return game;
+    }
+    return null;
   }
 }
 

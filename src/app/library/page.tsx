@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import styles from "./page.module.css";
-import { formatBytes, formatNumericBytes } from "@/utils/formatters";
+import { formatBytes, formatYearDisplay } from "@/utils/formatters";
 import {
   Gamepad2,
   DownloadCloud,
@@ -13,15 +13,25 @@ import {
   RotateCcw,
   ExternalLink,
   Folder,
-  Play
+  Play,
+  Plus,
+  Trash2,
+  FolderSearch,
+  Loader2,
+  X
 } from "lucide-react";
 
 type Tab = "installed" | "downloads" | "browse";
 
 interface InstalledGame {
+  id: string;
   name: string;
   executablePath: string;
-  size?: string;
+  size?: string | null;
+  year?: string | null;
+  source?: string;
+  thumbnail?: string | null;
+  dateAdded?: string;
 }
 
 interface DownloadHistoryItem {
@@ -38,35 +48,123 @@ export default function LibraryPage() {
   const [installed, setInstalled] = useState<InstalledGame[]>([]);
   const [history, setHistory] = useState<DownloadHistoryItem[]>([]);
   const [downloadDir, setDownloadDir] = useState("...");
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addName, setAddName] = useState("");
+  const [addPath, setAddPath] = useState("");
+  const [addSize, setAddSize] = useState("");
+  const [addYear, setAddYear] = useState("");
+  const [addSource, setAddSource] = useState("Manual");
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [launchingId, setLaunchingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadLibrary();
+  const invoke = useCallback((channel: string, ...args: unknown[]) => {
+    if (window.require) {
+      const { ipcRenderer } = window.require("electron");
+      return ipcRenderer.invoke(channel, ...args);
+    }
+    return Promise.resolve(null);
   }, []);
 
-  const loadLibrary = async () => {
+  const loadLibrary = useCallback(async () => {
     try {
-      const { ipcRenderer } = (window as any).require("electron");
-      const dir = await ipcRenderer.invoke("get-download-dir");
-      setDownloadDir(dir);
-      const inst = await ipcRenderer.invoke("get-installed-games");
-      setInstalled(inst || []);
-      const hist = await ipcRenderer.invoke("get-download-history");
-      setHistory(hist || []);
+      const dir = await invoke("get-download-dir");
+      setDownloadDir(typeof dir === "string" ? dir : "...");
+      const inst = await invoke("get-installed-games");
+      setInstalled(Array.isArray(inst) ? inst : []);
+      const hist = await invoke("get-download-history");
+      setHistory(Array.isArray(hist) ? hist : []);
     } catch (err) {
       console.error("Failed to load library:", err);
     }
-  };
+  }, [invoke]);
+
+  useEffect(() => {
+    loadLibrary();
+  }, [loadLibrary]);
 
   const openFolder = async (path?: string) => {
     try {
-      const { ipcRenderer } = (window as any).require("electron");
       if (path) {
-        await ipcRenderer.invoke("open-folder", path);
+        await invoke("open-folder", path);
       } else {
-        await ipcRenderer.invoke("open-download-dir");
+        await invoke("open-download-dir");
       }
     } catch (err) {
       console.error("Failed to open folder:", err);
+    }
+  };
+
+  const launchGame = async (game: InstalledGame) => {
+    setLaunchingId(game.id);
+    setNotice("");
+    try {
+      const res = await invoke("launch-game", game.executablePath);
+      if (res && res.ok === false) {
+        setNotice(res.error || "Failed to launch game.");
+      }
+    } catch (err) {
+      console.error("Launch failed:", err);
+      setNotice("Failed to launch game.");
+    } finally {
+      setLaunchingId(null);
+    }
+  };
+
+  const removeGame = async (game: InstalledGame) => {
+    try {
+      await invoke("remove-installed-game", game.id);
+      await loadLibrary();
+    } catch (err) {
+      console.error("Remove failed:", err);
+    }
+  };
+
+  const pickExecutable = async () => {
+    try {
+      const res = await invoke("add-installed-game");
+      if (res && res.ok) {
+        setNotice(`Added "${res.game?.name || "game"}" to your library.`);
+        await loadLibrary();
+      }
+    } catch (err) {
+      console.error("Add game failed:", err);
+    }
+  };
+
+  const saveManualGame = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addName.trim() || !addPath.trim()) {
+      setNotice("Game name and executable path are required.");
+      return;
+    }
+    setSaving(true);
+    setNotice("");
+    try {
+      const res = await invoke("add-game-entry", {
+        name: addName.trim(),
+        executablePath: addPath.trim(),
+        size: addSize.trim() || null,
+        year: addYear.trim() || null,
+        source: addSource.trim() || "Manual",
+      });
+      if (res && res.ok) {
+        setNotice(`Added "${res.game?.name || addName}" to your library.`);
+        setAddName("");
+        setAddPath("");
+        setAddSize("");
+        setAddYear("");
+        setAddSource("Manual");
+        setShowAddForm(false);
+        await loadLibrary();
+      } else {
+        setNotice(res?.error || "Failed to add game.");
+      }
+    } catch (err) {
+      console.error("Save game failed:", err);
+      setNotice("Failed to add game.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -78,6 +176,15 @@ export default function LibraryPage() {
           Launch installed titles, review download history, and manage local storage files.
         </p>
       </div>
+
+      {notice && (
+        <div className={styles.notice}>
+          <span>{notice}</span>
+          <button className={styles.noticeClose} onClick={() => setNotice("")}>
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
 
       <div className={styles.tabs}>
         <button
@@ -110,61 +217,187 @@ export default function LibraryPage() {
       <div className={styles.content}>
         {tab === "installed" && (
           <>
-            {installed.length === 0 ? (
+            {installed.length === 0 && !showAddForm ? (
               <div className={styles.emptyState}>
                 <div className={styles.emptyIcon}>
                   <Gamepad2 className="w-12 h-12 stroke-[1.5]" />
                 </div>
                 <h3>No installed games detected</h3>
-                <p>Your downloads folder doesn't contain recognized game executables yet.</p>
+                <p>Add a game executable to your library to launch it straight from the app.</p>
                 <div className={styles.dirPath}>{downloadDir}</div>
-                <div>
+                <div className={styles.emptyActions}>
                   <button className={styles.openBtn} onClick={() => openFolder()}>
                     <FolderOpen className="w-4 h-4" />
                     Open Downloads Folder
                   </button>
+                  <button className={styles.addBtn} onClick={() => setShowAddForm(true)}>
+                    <Plus className="w-4 h-4" />
+                    Add Game
+                  </button>
                 </div>
               </div>
             ) : (
-              <div className={styles.list}>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
-                  <button className={styles.openBtn} style={{ marginTop: 0 }} onClick={() => openFolder()}>
-                    <FolderOpen className="w-4 h-4" />
-                    Open Downloads Folder
-                  </button>
-                </div>
-                {installed.map((game, i) => (
-                  <div
-                    key={i}
-                    className={styles.listItem}
-                    onClick={() => openFolder(game.executablePath)}
-                  >
-                    <div className={styles.listIconWrapper}>
-                      <Gamepad2 className="w-5 h-5" />
-                    </div>
-                    <div className={styles.listInfo}>
-                      <h4>{game.name}</h4>
-                      <p>{game.executablePath}</p>
-                    </div>
-                    {game.size && (
-                      <span className={styles.listSize}>
-                        {formatBytes(game.size)}
-                      </span>
-                    )}
-                    <button
-                      className={styles.openBtn}
-                      style={{ marginTop: 0 }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openFolder(game.executablePath);
-                      }}
-                    >
-                      <Play className="w-3.5 h-3.5 fill-current" />
-                      Launch
+              <>
+                <div className={styles.listHeader}>
+                  <div className={styles.listHeaderActions}>
+                    <button className={styles.openBtn} style={{ marginTop: 0 }} onClick={() => openFolder()}>
+                      <FolderOpen className="w-4 h-4" />
+                      Open Downloads Folder
+                    </button>
+                    <button className={styles.addBtn} style={{ marginTop: 0 }} onClick={() => setShowAddForm((v) => !v)}>
+                      {showAddForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                      {showAddForm ? "Close" : "Add Game"}
                     </button>
                   </div>
-                ))}
-              </div>
+                </div>
+
+                {showAddForm && (
+                  <form className={styles.addForm} onSubmit={saveManualGame}>
+                    <div className={styles.addFormTitle}>Add a game to your library</div>
+                    <div className={styles.addFormGrid}>
+                      <label className={styles.addField}>
+                        <span>Game Name *</span>
+                        <input
+                          type="text"
+                          value={addName}
+                          onChange={(e) => setAddName(e.target.value)}
+                          placeholder="e.g. Cyberpunk 2077"
+                        />
+                      </label>
+                      <label className={styles.addField}>
+                        <span>Executable Path *</span>
+                        <div className={styles.pathInputWrap}>
+                          <input
+                            type="text"
+                            value={addPath}
+                            onChange={(e) => setAddPath(e.target.value)}
+                            placeholder="C:\Games\Cyberpunk 2077\bin\x64\Cyberpunk2077.exe"
+                          />
+                          <button
+                            type="button"
+                            className={styles.browseBtn}
+                            onClick={pickExecutable}
+                            title="Browse for executable"
+                          >
+                            <FolderSearch className="w-4 h-4" />
+                            Browse
+                          </button>
+                        </div>
+                      </label>
+                      <label className={styles.addField}>
+                        <span>Size (optional)</span>
+                        <input
+                          type="text"
+                          value={addSize}
+                          onChange={(e) => setAddSize(e.target.value)}
+                          placeholder="e.g. 45.2 GB"
+                        />
+                      </label>
+                      <label className={styles.addField}>
+                        <span>Year (optional)</span>
+                        <input
+                          type="text"
+                          value={addYear}
+                          onChange={(e) => setAddYear(e.target.value)}
+                          placeholder="e.g. 2020"
+                        />
+                      </label>
+                      <label className={styles.addField}>
+                        <span>Source (optional)</span>
+                        <input
+                          type="text"
+                          value={addSource}
+                          onChange={(e) => setAddSource(e.target.value)}
+                          placeholder="e.g. Steam, Epic, Manual"
+                        />
+                      </label>
+                    </div>
+                    <div className={styles.addFormActions}>
+                      <button type="button" className={styles.cancelBtn} onClick={() => setShowAddForm(false)}>
+                        Cancel
+                      </button>
+                      <button type="submit" className={styles.saveBtn} disabled={saving}>
+                        {saving ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" /> Adding…
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="w-4 h-4" /> Add to Library
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                <div className={styles.list}>
+                  {installed.map((game) => (
+                    <div key={game.id} className={styles.listItem}>
+                      <div className={styles.listIconWrapper}>
+                        <Gamepad2 className="w-5 h-5" />
+                      </div>
+                      <div className={styles.listInfo}>
+                        <h4>{game.name}</h4>
+                        <p>{game.executablePath}</p>
+                        <div className={styles.listMetaRow}>
+                          {game.source && (
+                            <span className={styles.listSource}>{game.source}</span>
+                          )}
+                          {game.year && (
+                            <span className={styles.listYear}>
+                              {formatYearDisplay(game.year)}
+                            </span>
+                          )}
+                          {game.size && (
+                            <span className={styles.listSize}>
+                              {formatBytes(game.size)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className={styles.listActions}>
+                        <button
+                          className={styles.openBtn}
+                          style={{ marginTop: 0 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openFolder(game.executablePath);
+                          }}
+                          title="Show in folder"
+                        >
+                          <Folder className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          className={styles.launchBtn}
+                          disabled={launchingId === game.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            launchGame(game);
+                          }}
+                        >
+                          {launchingId === game.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Play className="w-3.5 h-3.5 fill-current" />
+                          )}
+                          Launch
+                        </button>
+                        <button
+                          className={styles.removeBtn}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeGame(game);
+                          }}
+                          title="Remove from library"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
           </>
         )}
@@ -195,7 +428,7 @@ export default function LibraryPage() {
                     <div className={styles.listInfo}>
                       <h4>{item.filename}</h4>
                       <p>
-                        {item.source || "Direct"} • {formatNumericBytes(item.totalBytes)}
+                        {item.source || "Direct"} • {formatBytes(item.totalBytes)}
                       </p>
                     </div>
                     <div className={styles.listActions}>
@@ -204,8 +437,7 @@ export default function LibraryPage() {
                           className={styles.retryBtn}
                           onClick={(e) => {
                             e.stopPropagation();
-                            const { ipcRenderer } = (window as any).require("electron");
-                            ipcRenderer.invoke("resume-download", item.id);
+                            invoke("resume-download", item.id);
                           }}
                         >
                           <RotateCcw className="w-3.5 h-3.5" />

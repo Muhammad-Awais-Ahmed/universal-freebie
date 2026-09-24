@@ -4,7 +4,22 @@ const cheerio = require('cheerio');
 // Search pagination: scroll through every result page (up to SEARCH_MAX_PAGES)
 // so ALL matches load; the main process then ranks them by relevance.
 const SEARCH_MAX_PAGES = 4;
-const DETAIL_FETCH_LIMIT = 5; // Only fetch detail pages for top N results to avoid rate limiting
+// Fetch detail pages for EVERY result so size/year are never missing.
+// Concurrency is capped (DETAIL_CONCURRENCY) to avoid hammering the site.
+const DETAIL_CONCURRENCY = 4;
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let index = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (index < items.length) {
+      const i = index++;
+      results[i] = await mapper(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
 async function searchSteamUnlocked(query) {
   const results = [];
@@ -58,8 +73,9 @@ async function searchSteamUnlocked(query) {
       if (pageCount === 0) break;
     }
 
-    // Fetch detail pages for top results to get size info
-    const detailPromises = results.slice(0, DETAIL_FETCH_LIMIT).map(async (game) => {
+    // Fetch detail pages for ALL results so size/year are never missing.
+    // Concurrency is capped to avoid hammering the site.
+    await mapWithConcurrency(results, DETAIL_CONCURRENCY, async (game) => {
       try {
         const detailResponse = await axios.get(game.url, {
           headers: {
@@ -87,8 +103,6 @@ async function searchSteamUnlocked(query) {
         // Silently ignore detail fetch errors
       }
     });
-    
-    await Promise.allSettled(detailPromises);
 
     return results;
   } catch (error) {

@@ -7,7 +7,7 @@ import LinkDownload from "@/components/LinkDownload";
 import { extractYearNumber, parseSizeBytes } from "@/utils/formatters";
 import styles from "./games.module.css";
 import searchStyles from "@/components/Search.module.css";
-import { Calendar, ArrowUpDown, X, ChevronRight, Archive, Flame, Gamepad2 } from "lucide-react";
+import { Calendar, ArrowUpDown, X, ChevronRight, Archive, Flame, Gamepad2, HardDrive } from "lucide-react";
 
 const sourceFilters = [
   { key: "archive", label: "Archive.org" },
@@ -56,6 +56,8 @@ export default function GamesPage() {
   const [searching, setSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [selectedYear, setSelectedYear] = useState<string>("all");
+  const [sizeFilter, setSizeFilter] = useState<string>("all");
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("relevance");
 
   const toggleFilter = (key: string) => {
@@ -68,6 +70,8 @@ export default function GamesPage() {
     setSearching(true);
     setHasSearched(true);
     setSelectedYear("all");
+    setSizeFilter("all");
+    setSourceFilter("all");
     setSortBy("relevance");
     try {
       const { ipcRenderer } = (window as any).require("electron");
@@ -117,20 +121,71 @@ export default function GamesPage() {
     return { counts, uniqueYears, unknownCount, ranges: { "2024+": count2024Plus, "2020-2023": count2020To2023, "2015-2019": count2015To2019, "2010-2014": count2010To2014, "2000-2009": count2000To2009, "pre-2000": countPre2000 } };
   }, [results]);
 
-  const filteredResults = useMemo(() => {
-    if (selectedYear === "all") return results;
-    return results.filter((game) => {
-      const yr = extractYearNumber(game.year);
-      if (selectedYear === "unknown") return yr === null;
-      if (selectedYear === "2024+") return yr !== null && yr >= 2024;
-      if (selectedYear === "2020-2023") return yr !== null && yr >= 2020 && yr <= 2023;
-      if (selectedYear === "2015-2019") return yr !== null && yr >= 2015 && yr <= 2019;
-      if (selectedYear === "2010-2014") return yr !== null && yr >= 2010 && yr <= 2014;
-      if (selectedYear === "2000-2009") return yr !== null && yr >= 2000 && yr <= 2009;
-      if (selectedYear === "pre-2000") return yr !== null && yr < 2000;
-      return yr === Number(selectedYear);
+  const sizeStats = useMemo(() => {
+    let unknown = 0, lt1 = 0, r1to5 = 0, r5to15 = 0, r15to30 = 0, gt30 = 0;
+    results.forEach((game) => {
+      const bytes = parseSizeBytes(game.size);
+      if (bytes <= 0) unknown++;
+      else if (bytes < 1024 * 1024 * 1024) lt1++;
+      else if (bytes < 5 * 1024 * 1024 * 1024) r1to5++;
+      else if (bytes < 15 * 1024 * 1024 * 1024) r5to15++;
+      else if (bytes < 30 * 1024 * 1024 * 1024) r15to30++;
+      else gt30++;
     });
-  }, [results, selectedYear]);
+    return { unknown, lt1, r1to5, r5to15, r15to30, gt30 };
+  }, [results]);
+
+  const sourceStats = useMemo(() => {
+    let archive = 0, fitgirl = 0, steamunlocked = 0, other = 0;
+    results.forEach((game) => {
+      const src = (game.source || "").toLowerCase();
+      if (src.includes("archive")) archive++;
+      else if (src.includes("fitgirl")) fitgirl++;
+      else if (src.includes("steam")) steamunlocked++;
+      else other++;
+    });
+    return { archive, fitgirl, steamunlocked, other };
+  }, [results]);
+
+  const filteredResults = useMemo(() => {
+    let list = results;
+    if (selectedYear !== "all") {
+      list = list.filter((game) => {
+        const yr = extractYearNumber(game.year);
+        if (selectedYear === "unknown") return yr === null;
+        if (selectedYear === "2024+") return yr !== null && yr >= 2024;
+        if (selectedYear === "2020-2023") return yr !== null && yr >= 2020 && yr <= 2023;
+        if (selectedYear === "2015-2019") return yr !== null && yr >= 2015 && yr <= 2019;
+        if (selectedYear === "2010-2014") return yr !== null && yr >= 2010 && yr <= 2014;
+        if (selectedYear === "2000-2009") return yr !== null && yr >= 2000 && yr <= 2009;
+        if (selectedYear === "pre-2000") return yr !== null && yr < 2000;
+        return yr === Number(selectedYear);
+      });
+    }
+    if (sizeFilter !== "all") {
+      list = list.filter((game) => {
+        const bytes = parseSizeBytes(game.size);
+        if (sizeFilter === "unknown") return bytes <= 0;
+        if (sizeFilter === "lt-1gb") return bytes > 0 && bytes < 1024 * 1024 * 1024;
+        if (sizeFilter === "1-5gb") return bytes >= 1024 * 1024 * 1024 && bytes < 5 * 1024 * 1024 * 1024;
+        if (sizeFilter === "5-15gb") return bytes >= 5 * 1024 * 1024 * 1024 && bytes < 15 * 1024 * 1024 * 1024;
+        if (sizeFilter === "15-30gb") return bytes >= 15 * 1024 * 1024 * 1024 && bytes < 30 * 1024 * 1024 * 1024;
+        if (sizeFilter === "gt-30gb") return bytes >= 30 * 1024 * 1024 * 1024;
+        return true;
+      });
+    }
+    if (sourceFilter !== "all") {
+      list = list.filter((game) => {
+        const src = (game.source || "").toLowerCase();
+        if (sourceFilter === "archive") return src.includes("archive");
+        if (sourceFilter === "fitgirl") return src.includes("fitgirl");
+        if (sourceFilter === "steamunlocked") return src.includes("steam");
+        if (sourceFilter === "other") return !src.includes("archive") && !src.includes("fitgirl") && !src.includes("steam");
+        return true;
+      });
+    }
+    return list;
+  }, [results, selectedYear, sizeFilter, sourceFilter]);
 
   const displayResults = useMemo(() => {
     if (sortBy === "relevance") return filteredResults;
@@ -160,8 +215,36 @@ export default function GamesPage() {
                 </button>
               </span>
             )}
+            {sizeFilter !== "all" && (
+              <span className={searchStyles.activeFilterBadge}>
+                Size: {sizeFilter}
+                <button className={searchStyles.clearBtn} onClick={() => setSizeFilter("all")} title="Clear Size Filter">
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              </span>
+            )}
+            {sourceFilter !== "all" && (
+              <span className={searchStyles.activeFilterBadge}>
+                Source: {sourceFilter}
+                <button className={searchStyles.clearBtn} onClick={() => setSourceFilter("all")} title="Clear Source Filter">
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              </span>
+            )}
           </div>
           <div className={searchStyles.toolbarControls}>
+            <div className={searchStyles.controlGroup}>
+              <label htmlFor="source-select" className={searchStyles.controlLabel}>
+                <Gamepad2 className="w-3.5 h-3.5" style={{ color: "#22c55e" }} /> Source:
+              </label>
+              <select id="source-select" className={searchStyles.selectDropdown} value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
+                <option value="all">All Sources ({results.length})</option>
+                {sourceStats.archive > 0 && <option value="archive">Archive.org ({sourceStats.archive})</option>}
+                {sourceStats.fitgirl > 0 && <option value="fitgirl">FitGirl ({sourceStats.fitgirl})</option>}
+                {sourceStats.steamunlocked > 0 && <option value="steamunlocked">SteamUnlocked ({sourceStats.steamunlocked})</option>}
+                {sourceStats.other > 0 && <option value="other">Other ({sourceStats.other})</option>}
+              </select>
+            </div>
             <div className={searchStyles.controlGroup}>
               <label htmlFor="year-select" className={searchStyles.controlLabel}>
                 <Calendar className="w-3.5 h-3.5" style={{ color: "#7c3aed" }} /> Year:
@@ -182,6 +265,20 @@ export default function GamesPage() {
                   </optgroup>
                 )}
                 {yearStats.unknownCount > 0 && <option value="unknown">Unknown Year ({yearStats.unknownCount})</option>}
+              </select>
+            </div>
+            <div className={searchStyles.controlGroup}>
+              <label htmlFor="size-select" className={searchStyles.controlLabel}>
+                <HardDrive className="w-3.5 h-3.5" style={{ color: "#06b6d4" }} /> Size:
+              </label>
+              <select id="size-select" className={searchStyles.selectDropdown} value={sizeFilter} onChange={(e) => setSizeFilter(e.target.value)}>
+                <option value="all">All Sizes ({results.length})</option>
+                {sizeStats.lt1 > 0 && <option value="lt-1gb">Under 1 GB ({sizeStats.lt1})</option>}
+                {sizeStats.r1to5 > 0 && <option value="1-5gb">1 – 5 GB ({sizeStats.r1to5})</option>}
+                {sizeStats.r5to15 > 0 && <option value="5-15gb">5 – 15 GB ({sizeStats.r5to15})</option>}
+                {sizeStats.r15to30 > 0 && <option value="15-30gb">15 – 30 GB ({sizeStats.r15to30})</option>}
+                {sizeStats.gt30 > 0 && <option value="gt-30gb">Over 30 GB ({sizeStats.gt30})</option>}
+                {sizeStats.unknown > 0 && <option value="unknown">Unknown Size ({sizeStats.unknown})</option>}
               </select>
             </div>
             <div className={searchStyles.controlGroup}>
@@ -265,8 +362,16 @@ export default function GamesPage() {
           isSearching={searching}
           hasSearched={hasSearched}
           toolbar={renderToolbar()}
-          emptyTitle={results.length > 0 && displayResults.length === 0 ? `No games found for year "${selectedYear}"` : undefined}
-          emptyText={results.length > 0 && displayResults.length === 0 ? "Try selecting a different year or clear the filter." : undefined}
+          emptyTitle={
+            results.length > 0 && displayResults.length === 0
+              ? `No games match the current filters${selectedYear !== "all" ? ` (Year: ${selectedYear})` : ""}${sizeFilter !== "all" ? ` (Size: ${sizeFilter})` : ""}${sourceFilter !== "all" ? ` (Source: ${sourceFilter})` : ""}`
+              : undefined
+          }
+          emptyText={
+            results.length > 0 && displayResults.length === 0
+              ? "Try selecting a different year/size/source or clear the filters."
+              : undefined
+          }
         >
           {displayResults.map((game, i) => (
             <GameCard key={game.id || i} game={game} onDownload={handleDownload} />

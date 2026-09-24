@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import styles from "./DownloadManager.module.css";
 import { formatNumericBytes } from "@/utils/formatters";
-import { DownloadCloud, ChevronDown, ChevronUp, Square, RotateCcw, X } from "lucide-react";
+import { DownloadCloud, ChevronDown, ChevronUp, Square, RotateCcw, X, FolderOpen } from "lucide-react";
 
 interface DownloadItem {
   id: string;
@@ -185,6 +185,13 @@ export default function DownloadManager() {
               </div>
             ))
           )}
+          <button
+            className={styles.openFolderBtn}
+            onClick={() => invoke("open-download-dir")}
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            Open Downloads Folder
+          </button>
         </div>
       )}
     </div>

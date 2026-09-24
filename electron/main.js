@@ -2121,21 +2121,48 @@ ipcMain.handle('delete-file', (event, itemPath) => {
 // Library: Installed Games IPC
 ipcMain.handle('get-installed-games', () => db.getInstalledGames());
 
+// Add a game manually: opens a file picker for the .exe, then stores it.
 ipcMain.handle('add-installed-game', async () => {
   const result = await dialog.showOpenDialog({
+    title: 'Select Game Executable',
     properties: ['openFile'],
-    filters: [{ name: 'Executables', extensions: ['exe'] }]
+    filters: [
+      { name: 'Executables', extensions: ['exe', 'bat', 'cmd', 'lnk'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
   });
   
   if (!result.canceled && result.filePaths.length > 0) {
     const exePath = result.filePaths[0];
-    const name = path.basename(exePath, '.exe');
+    const name = path.basename(exePath, path.extname(exePath));
     
     const game = { name, executablePath: exePath };
     db.addInstalledGame(game);
-    return true;
+    return { ok: true, game: db.getInstalledGames().find(g => g.executablePath === exePath) };
   }
-  return false;
+  return { ok: false };
+});
+
+// Add a game with full metadata (used by "Add Game" form in Library).
+ipcMain.handle('add-game-entry', (event, gameData) => {
+  try {
+    if (!gameData || !gameData.name || !gameData.executablePath) {
+      return { ok: false, error: 'Name and executable path are required.' };
+    }
+    const game = {
+      name: String(gameData.name).trim(),
+      executablePath: String(gameData.executablePath).trim(),
+      size: gameData.size || null,
+      year: gameData.year || null,
+      source: gameData.source || 'Manual',
+      thumbnail: gameData.thumbnail || null
+    };
+    db.addInstalledGame(game);
+    return { ok: true, game: db.getInstalledGames().find(g => g.executablePath === game.executablePath) };
+  } catch (err) {
+    console.error('add-game-entry error:', err);
+    return { ok: false, error: err.message };
+  }
 });
 
 ipcMain.handle('remove-installed-game', (event, id) => {
@@ -2145,12 +2172,21 @@ ipcMain.handle('remove-installed-game', (event, id) => {
 
 ipcMain.handle('launch-game', (event, exePath) => {
   try {
+    if (!exePath || !fs.existsSync(exePath)) {
+      return { ok: false, error: 'Executable not found on disk.' };
+    }
     const gameDir = path.dirname(exePath);
-    spawn(exePath, [], { cwd: gameDir, detached: true, stdio: 'ignore' }).unref();
-    return true;
+    const child = spawn(exePath, [], {
+      cwd: gameDir,
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false
+    });
+    child.unref();
+    return { ok: true };
   } catch (err) {
     console.error('Launch error:', err);
-    return false;
+    return { ok: false, error: err.message };
   }
 });
 

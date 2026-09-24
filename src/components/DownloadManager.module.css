@@ -239,3 +239,30 @@
 }
 
 .retryBtn:hover { background: rgba(124,58,237,0.25); color: #fff; }
+
+.openFolderBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+  color: #67e8f9;
+  cursor: pointer;
+  background: rgba(6, 182, 212, 0.08);
+  border: 1px solid rgba(6, 182, 212, 0.25);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-family: var(--font-gaming);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  transition: all 0.2s;
+}
+
+.openFolderBtn:hover {
+  background: rgba(6, 182, 212, 0.18);
+  border-color: rgba(6, 182, 212, 0.5);
+  color: #fff;
+}

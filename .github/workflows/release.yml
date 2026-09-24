@@ -31,6 +31,18 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
+      - name: Decode Signing Certificate
+        shell: pwsh
+        run: |
+          if ("${{ secrets.UF_CERT_BASE64 }}" -ne "") {
+            $bytes = [Convert]::FromBase64String("${{ secrets.UF_CERT_BASE64 }}")
+            New-Item -ItemType Directory -Path "certs" -Force | Out-Null
+            [IO.File]::WriteAllBytes("certs/universal-freebie.pfx", $bytes)
+            Write-Output "Certificate decoded"
+          } else {
+            Write-Output "No certificate secret set - building unsigned"
+          }
+
       - name: Build and Package App
         run: npm run package -- --publish=never
 

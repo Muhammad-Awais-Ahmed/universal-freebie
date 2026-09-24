@@ -40,6 +40,11 @@ desktop.ini
 .env.*
 !.env.example
 
+# Code signing certificates (never commit)
+certs/
+*.pfx
+cert-base64.txt
+
 # Downloads / user data (runtime generated)
 downloads/
 

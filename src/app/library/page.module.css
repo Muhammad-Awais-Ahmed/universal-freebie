@@ -435,6 +435,59 @@
 }
 .removeBtn:hover { background: rgba(239, 68, 68, 0.25); color: #fff; border-color: rgba(239, 68, 68, 0.5); }
 
+/* Storage Explorer folder list */
+.folderLoading, .folderEmpty {
+  color: #64748b;
+  font-size: 13px;
+  margin-top: 12px;
+}
+.folderList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  text-align: left;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.folderItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(13,15,26,0.9);
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 10px;
+  padding: 10px 14px;
+  transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
+}
+.folderItem:hover { border-color: rgba(34,211,238,0.4); background: rgba(18,21,36,0.98); }
+.folderItemIcon { display: flex; align-items: center; flex-shrink: 0; }
+.folderItemInfo {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.folderItemName {
+  color: #e2e8f0;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.folderItemMeta {
+  color: #64748b;
+  font-size: 11px;
+  margin-top: 2px;
+}
+.folderItemActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 @media (max-width: 700px) {
   .addFormGrid { grid-template-columns: 1fr; }
   .listHeaderActions { flex-wrap: wrap; }

@@ -94,10 +94,27 @@ export default function GamesPage() {
     }
   };
 
-  const handleSourceSearch = (sourceKey: string) => {
+  const handleSourceSearch = async (sourceKey: string) => {
+    // Featured Source card clicked → search that source for popular games.
+    // Use a broad query so the provider returns its top/featured titles.
+    const sourceQuery = "games";
     setFilters({ archive: false, fitgirl: false, steamunlocked: false, [sourceKey]: true });
-    setQuery(" ");
-    // trigger search via form
+    setQuery(sourceQuery);
+    setSearching(true);
+    setHasSearched(true);
+    setSelectedYear("all");
+    setSizeFilter("all");
+    setSourceFilter("all");
+    setSortBy("relevance");
+    try {
+      const { ipcRenderer } = (window as any).require("electron");
+      const res = await ipcRenderer.invoke("search-games", sourceQuery, [sourceKey]);
+      setResults(res || []);
+    } catch {
+      setResults([]);
+    } finally {
+      setSearching(false);
+    }
   };
 
   const yearStats = useMemo(() => {

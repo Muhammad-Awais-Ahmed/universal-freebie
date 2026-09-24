@@ -43,11 +43,21 @@ interface DownloadHistoryItem {
   status: string;
 }
 
+interface FolderEntry {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size: number;
+  modifiedAt: string;
+}
+
 export default function LibraryPage() {
   const [tab, setTab] = useState<Tab>("installed");
   const [installed, setInstalled] = useState<InstalledGame[]>([]);
   const [history, setHistory] = useState<DownloadHistoryItem[]>([]);
   const [downloadDir, setDownloadDir] = useState("...");
+  const [folderEntries, setFolderEntries] = useState<FolderEntry[]>([]);
+  const [folderLoading, setFolderLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [addName, setAddName] = useState("");
   const [addPath, setAddPath] = useState("");
@@ -92,6 +102,32 @@ export default function LibraryPage() {
       }
     } catch (err) {
       console.error("Failed to open folder:", err);
+    }
+  };
+
+  const loadFolderContents = useCallback(async () => {
+    setFolderLoading(true);
+    try {
+      const entries = await invoke("get-folder-contents");
+      setFolderEntries(Array.isArray(entries) ? entries : []);
+    } catch (err) {
+      console.error("Failed to load folder contents:", err);
+      setFolderEntries([]);
+    } finally {
+      setFolderLoading(false);
+    }
+  }, [invoke]);
+
+  useEffect(() => {
+    if (tab === "browse") loadFolderContents();
+  }, [tab, loadFolderContents]);
+
+  const deleteEntry = async (entry: FolderEntry) => {
+    try {
+      await invoke("delete-file", entry.path);
+      await loadFolderContents();
+    } catch (err) {
+      console.error("Delete failed:", err);
     }
   };
 
@@ -437,7 +473,7 @@ export default function LibraryPage() {
                           className={styles.retryBtn}
                           onClick={(e) => {
                             e.stopPropagation();
-                            invoke("resume-download", item.id);
+                            invoke("continue-download", item.id);
                           }}
                         >
                           <RotateCcw className="w-3.5 h-3.5" />
@@ -469,6 +505,54 @@ export default function LibraryPage() {
                 Open in Windows Explorer
               </button>
             </div>
+
+            {folderLoading ? (
+              <p className={styles.folderLoading}>Loading contents…</p>
+            ) : folderEntries.length === 0 ? (
+              <p className={styles.folderEmpty}>This folder is empty.</p>
+            ) : (
+              <div className={styles.folderList}>
+                {folderEntries.map((entry) => (
+                  <div key={entry.path} className={styles.folderItem}>
+                    <div className={styles.folderItemIcon}>
+                      {entry.isDirectory ? (
+                        <Folder className="w-4 h-4 text-amber-400" />
+                      ) : (
+                        <DownloadCloud className="w-4 h-4 text-sky-400" />
+                      )}
+                    </div>
+                    <div className={styles.folderItemInfo}>
+                      <span className={styles.folderItemName} title={entry.name}>
+                        {entry.name}
+                      </span>
+                      <span className={styles.folderItemMeta}>
+                        {entry.isDirectory ? "Folder" : formatBytes(entry.size)}
+                        {entry.modifiedAt
+                          ? ` • ${new Date(entry.modifiedAt).toLocaleDateString()}`
+                          : ""}
+                      </span>
+                    </div>
+                    <div className={styles.folderItemActions}>
+                      <button
+                        className={styles.openBtn}
+                        style={{ marginTop: 0 }}
+                        onClick={() => openFolder(entry.path)}
+                        title="Show in folder"
+                      >
+                        <FolderSearch className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        className={styles.removeBtn}
+                        onClick={() => deleteEntry(entry)}
+                        title="Delete"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

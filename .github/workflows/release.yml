@@ -39,7 +39,10 @@ jobs:
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: Release v1.0.${{ github.run_number }}
-          files: dist/*.exe
+          files: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml
           generate_release_notes: true
           draft: false
           prerelease: false

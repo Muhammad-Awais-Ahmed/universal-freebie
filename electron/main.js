@@ -4,6 +4,7 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const serve = require('electron-serve');
 const serveApp = serve.default || serve;
+const { autoUpdater } = require('electron-updater');
 
 const { searchArchiveOrg, getArchiveOrgFiles } = require('../src/backend/providers/archiveOrg');
 const { searchFitGirl, getFitGirlDownload } = require('../src/backend/providers/fitGirl');
@@ -23,6 +24,64 @@ let globalDownloader = null;
 // UGC_DEBUG=0 or by changing this line to false.
 // ---------------------------------------------------------------
 const UGC_DEBUG = process.env.UGC_DEBUG !== '0';
+
+let updateDownloaded = false;
+let updateCheckInProgress = false;
+
+function sendUpdateEvent(channel, payload = {}) {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send(channel, payload);
+  }
+}
+
+function initAutoUpdater() {
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    updateCheckInProgress = true;
+    sendUpdateEvent('update-checking');
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    updateCheckInProgress = false;
+    sendUpdateEvent('update-available', {
+      version: info.version,
+      currentVersion: app.getVersion(),
+      releaseNotes: info.releaseNotes || '',
+    });
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    updateCheckInProgress = false;
+    sendUpdateEvent('update-not-available');
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    sendUpdateEvent('update-download-progress', {
+      percent: Math.round(progress.percent),
+    });
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    updateCheckInProgress = false;
+    updateDownloaded = true;
+    sendUpdateEvent('update-downloaded', { version: info.version });
+  });
+
+  autoUpdater.on('error', (error) => {
+    updateCheckInProgress = false;
+    console.error('[updater]', error);
+    sendUpdateEvent('update-error', { message: error.message || String(error) });
+  });
+
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch((error) => {
+      updateCheckInProgress = false;
+      console.error('[updater] check failed:', error);
+    });
+  }, 4000);
+}
 
 // ---------------------------------------------------------------
 // Screen monitoring (Disabled / Commented out per user request)
@@ -203,6 +262,8 @@ process.on('unhandledRejection', (error) => {
 app.whenReady().then(() => {
   createWindow();
 
+  if (!isDev) initAutoUpdater();
+
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -210,6 +271,38 @@ app.whenReady().then(() => {
   console.error('Startup Error:', err);
   dialog.showErrorBox('Startup Error', err.stack || err.toString());
   app.quit();
+});
+
+ipcMain.handle('update:start-download', async () => {
+  if (updateDownloaded) return { status: 'downloaded' };
+  if (updateCheckInProgress) return { status: 'checking' };
+
+  updateCheckInProgress = true;
+  try {
+    await autoUpdater.downloadUpdate();
+    return { status: 'downloading' };
+  } catch (error) {
+    updateCheckInProgress = false;
+    return { status: 'error', message: error.message || String(error) };
+  }
+});
+
+ipcMain.handle('update:install', () => {
+  if (!updateDownloaded) return { status: 'not-downloaded' };
+  autoUpdater.quitAndInstall(false, true);
+  return { status: 'installing' };
+});
+
+ipcMain.handle('update:check', async () => {
+  if (isDev || updateCheckInProgress) return { status: 'checking' };
+  updateCheckInProgress = true;
+  try {
+    await autoUpdater.checkForUpdates();
+    return { status: 'checking' };
+  } catch (error) {
+    updateCheckInProgress = false;
+    return { status: 'error', message: error.message || String(error) };
+  }
 });
 
 app.on('window-all-closed', function () {

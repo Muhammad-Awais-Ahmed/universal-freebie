@@ -101,6 +101,31 @@ body {
 }
 .animate-pulse { animation: pulseGlow 2s infinite ease-in-out; }
 
+/* ─── App Update Prompt ─── */
+.update-overlay {
+  position: fixed; inset: 0; z-index: 100001; display: flex; align-items: center;
+  justify-content: center; padding: 24px; background: rgba(4, 5, 12, 0.82);
+  backdrop-filter: blur(12px);
+}
+.update-card {
+  width: 100%; max-width: 460px; padding: 30px; border: 1px solid rgba(34, 211, 238, 0.35);
+  border-radius: 14px; background: #10131f; box-shadow: 0 24px 70px rgba(0,0,0,.7), 0 0 40px rgba(34,211,238,.12);
+}
+.update-kicker { color: #22d3ee; font: 700 11px var(--font-mono); letter-spacing: .14em; }
+.update-card h2 { margin: 10px 0 12px; color: #fff; font: 700 24px var(--font-gaming); }
+.update-card p { margin: 0; color: #94a3b8; font-size: 14px; line-height: 1.6; }
+.update-progress { margin-top: 22px; }
+.update-progress-label { margin-bottom: 8px; color: #cbd5e1; font: 500 12px var(--font-mono); }
+.update-progress-track { height: 7px; overflow: hidden; border-radius: 4px; background: #232d42; }
+.update-progress-track span { display: block; height: 100%; border-radius: inherit; background: #22d3ee; transition: width .2s ease; }
+.update-error { margin-top: 18px !important; color: #fca5a5 !important; }
+.update-actions { display: flex; gap: 10px; margin-top: 26px; }
+.update-button { flex: 1; min-height: 42px; padding: 10px 14px; border: 0; border-radius: 8px; cursor: pointer; font: 700 12px var(--font-gaming); letter-spacing: .04em; }
+.update-button-primary { color: #061018; background: #22d3ee; }
+.update-button-primary:hover { background: #67e8f9; }
+.update-button-muted { color: #cbd5e1; background: #1a2035; border: 1px solid #2c3853; }
+.update-button:disabled { cursor: wait; opacity: .7; }
+
 /* ─── Consent Modal ─── */
 .consent-overlay {
   position: fixed; inset: 0; z-index: 100000;

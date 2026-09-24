@@ -19,6 +19,7 @@
     "axios": "^1.18.1",
     "cheerio": "1.0.0-rc.12",
     "electron-serve": "^1.1.0",
+    "electron-updater": "^6.3.9",
     "lucide-react": "^1.47.0",
     "next": "16.2.9",
     "react": "19.2.4",
@@ -60,6 +61,18 @@
     ],
     "win": {
       "target": "nsis"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Muhammad-Awais-Ahmed",
+        "repo": "universal-freebie"
+      }
+    ],
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
     }
   }
 }

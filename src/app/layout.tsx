@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import DownloadManager from "@/components/DownloadManager";
 import SidebarNav from "@/components/SidebarNav";
+import UpdatePrompt from "@/components/UpdatePrompt";
 
 export const metadata: Metadata = {
   title: "Universal Freebie | Gaming Launcher",
@@ -28,6 +29,7 @@ export default function RootLayout({
           {/* Persistent Bottom Floating Download Dock */}
           <DownloadManager />
         </div>
+        <UpdatePrompt />
       </body>
     </html>
   );

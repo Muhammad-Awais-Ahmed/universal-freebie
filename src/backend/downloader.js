@@ -1380,10 +1380,40 @@ class Downloader {
   }
 
   _emitProgress() {
-    // Throttled persistence of partial progress so a half-downloaded file
-    // can be resumed after an app restart (writes at most every 5s per item).
+    // Monotonic progress enforcement: some sources (yt-dlp fragment
+    // restarts, torrent.downloaded, electron getReceivedBytes, chunk
+    // retries) can report a LOWER byte count or percent mid-download,
+    // which makes the meter jump backwards. Track the max ever seen per
+    // item and never let the UI (or persisted history) see a decrease.
     const now = Date.now();
     for (const [, item] of this.downloads) {
+      if (item.status === 'downloading' || item.status === 'queued') {
+        const maxBytes = Math.max(item._maxDownloadedBytes || 0, item.downloadedBytes || 0);
+        item._maxDownloadedBytes = maxBytes;
+        // Never show more downloaded than total (totalBytes can shrink
+        // mid-download on some sources); keep the raw max for monotonicity.
+        item.downloadedBytes = item.totalBytes > 0 ? Math.min(maxBytes, item.totalBytes) : maxBytes;
+
+        // Percent must never go backwards either. Prefer the higher of
+        // the reported percent and the percent implied by the monotonic
+        // byte count, then clamp to the all-time max percent.
+        const reported = typeof item.progress === 'number' ? item.progress : 0;
+        let nextProgress = reported;
+        if (item.totalBytes > 0) {
+          const pctFromBytes = (maxBytes / item.totalBytes) * 100;
+          nextProgress = Math.max(reported, pctFromBytes);
+        }
+        item.progress = Math.min(100, Math.max(nextProgress, item._maxProgress || 0));
+        item._maxProgress = item.progress;
+
+        // Speed must never be negative (a decreasing byte count would
+        // otherwise produce a negative "speed" that makes the meter
+        // look like it's going backwards).
+        if (typeof item.speed === 'number' && item.speed < 0) item.speed = 0;
+      }
+
+      // Throttled persistence of partial progress so a half-downloaded file
+      // can be resumed after an app restart (writes at most every 5s per item).
       if (item.status === 'downloading' && (item._lastHistSave || 0) + 5000 < now) {
         item._lastHistSave = now;
         db.updateDownloadHistory(item.id, {

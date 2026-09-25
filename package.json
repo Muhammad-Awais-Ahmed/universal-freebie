@@ -63,8 +63,6 @@
       "target": "nsis",
       "signAndEditExecutable": true,
       "signtoolOptions": {
-        "certificateFile": "certs/universal-freebie.pfx",
-        "certificatePassword": "uf-code-sign-2026",
         "signingHashAlgorithms": ["sha256"],
         "rfc3161TimeStampServer": "http://timestamp.digicert.com"
       }

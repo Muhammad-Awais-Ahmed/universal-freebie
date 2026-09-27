@@ -37,16 +37,27 @@ export default function UpdatePrompt() {
       setState("error");
     };
 
+    // The main process only emits this when the published release is not
+    // newer than the running build, or when the user already skipped it.
+    // Either way any dialog left over from an earlier check must go away.
+    const onNotAvailable = () => {
+      setUpdate(null);
+      setState(null);
+      setProgress(0);
+    };
+
     ipcRenderer.on("update-available", onAvailable);
     ipcRenderer.on("update-download-progress", onProgress);
     ipcRenderer.on("update-downloaded", onDownloaded);
     ipcRenderer.on("update-error", onError);
+    ipcRenderer.on("update-not-available", onNotAvailable);
 
     return () => {
       ipcRenderer.removeListener("update-available", onAvailable);
       ipcRenderer.removeListener("update-download-progress", onProgress);
       ipcRenderer.removeListener("update-downloaded", onDownloaded);
       ipcRenderer.removeListener("update-error", onError);
+      ipcRenderer.removeListener("update-not-available", onNotAvailable);
     };
   }, []);
 
@@ -68,6 +79,17 @@ export default function UpdatePrompt() {
     setState("available");
     const { ipcRenderer } = window.require("electron");
     await ipcRenderer.invoke("update:check-latest");
+  };
+
+  // "Later" is remembered for this specific version, so the dialog does not
+  // reappear on the next launch. A genuinely newer release still shows up.
+  const dismiss = async () => {
+    const version = update?.version;
+    setUpdate(null);
+    setState(null);
+    setProgress(0);
+    const { ipcRenderer } = window.require("electron");
+    await ipcRenderer.invoke("update:skip", version);
   };
 
   return (
@@ -100,7 +122,7 @@ export default function UpdatePrompt() {
           {state !== "downloading" && (
             <button className="update-button update-button-muted" onClick={checkForUpdates}>Check for updates</button>
           )}
-          {state !== "downloading" && <button className="update-button update-button-muted" onClick={() => setState(null)}>Later</button>}
+          {state !== "downloading" && <button className="update-button update-button-muted" onClick={dismiss}>Later</button>}
         </div>
       </div>
     </div>

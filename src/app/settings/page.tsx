@@ -15,7 +15,10 @@ import {
   Bot,
   Package,
   Rocket,
-  Trash2
+  Trash2,
+  Download,
+  CircleCheck,
+  CircleAlert
 } from "lucide-react";
 
 interface ProxyStatus {
@@ -49,6 +52,8 @@ export default function SettingsPage() {
   const [autoInstallDependencies, setAutoInstallDependencies] = useState(true);
   const [autoLaunchInstaller, setAutoLaunchInstaller] = useState(true);
   const [autoDeleteAfterInstall, setAutoDeleteAfterInstall] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "latest" | "outdated" | "error">("idle");
+  const [appVersion, setAppVersion] = useState("...");
 
   useEffect(() => {
     loadSettings();
@@ -61,6 +66,13 @@ export default function SettingsPage() {
         ipcRenderer.invoke("get-settings"),
         ipcRenderer.invoke("get-proxy-status"),
       ]);
+      // Best effort: an older main process may not expose this handler yet.
+      ipcRenderer.invoke("app:version").then(
+        (info: { version?: string }) => {
+          if (info && info.version) setAppVersion(info.version);
+        },
+        () => {}
+      );
       if (settings) {
         setDownloadDir(settings.downloadDirectory || "...");
         setMaxConcurrent(settings.maxConcurrent || 50);
@@ -135,6 +147,28 @@ export default function SettingsPage() {
       }
     } catch (err) {
       console.error("Failed to choose folder:", err);
+    }
+  };
+
+  // Updates are no longer checked on startup, so this is the only way to ask
+  // for one. The main process only opens the update screen when the published
+  // release really is newer than this build, so an up-to-date install simply
+  // reports "latest" here without interrupting the user.
+  const checkForUpdates = async () => {
+    setUpdateStatus("checking");
+    try {
+      const { ipcRenderer } = (window as any).require("electron");
+      const result = await ipcRenderer.invoke("update:check-latest");
+      if (!result || result.status === "error") {
+        setUpdateStatus("error");
+      } else if (result.status === "available") {
+        setUpdateStatus("outdated");
+      } else {
+        setUpdateStatus("latest");
+      }
+    } catch (err) {
+      console.error("Failed to check for updates:", err);
+      setUpdateStatus("error");
     }
   };
 
@@ -440,6 +474,63 @@ export default function SettingsPage() {
                 </p>
               </div>
             </>
+          )}
+        </div>
+
+        {/* Application Updates */}
+        <div className={styles.section}>
+          <h2 className={styles.sectionTitle}>
+            <Download className="w-4 h-4 text-cyan-500" />
+            Application Updates
+          </h2>
+          <div className={styles.field}>
+            <label className={styles.label}>
+              Installed version: <span className="text-cyan-400 font-mono font-bold">v{appVersion}</span>
+            </label>
+            <p className={styles.proxyNote}>
+              This app never checks for updates on its own and never interrupts you at
+              startup. Click below to ask GitHub whether a newer release has been
+              published. If one exists, the update screen opens and you choose what
+              happens next.
+            </p>
+          </div>
+
+          <div className={styles.proxyActionsRow}>
+            <button
+              type="button"
+              className={styles.actionBtnPrimary}
+              onClick={checkForUpdates}
+              disabled={updateStatus === "checking"}
+            >
+              {updateStatus === "checking" ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Checking…
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5" /> Check for Updates
+                </>
+              )}
+            </button>
+          </div>
+
+          {updateStatus === "latest" && (
+            <div className={styles.proxyTimestamp}>
+              <CircleCheck className="w-3.5 h-3.5 inline mr-1.5 text-emerald-400" />
+              You are on the latest version. Nothing to install.
+            </div>
+          )}
+          {updateStatus === "outdated" && (
+            <div className={styles.proxyTimestamp}>
+              <Download className="w-3.5 h-3.5 inline mr-1.5 text-cyan-400" />
+              A newer release is available. The update screen has been opened for you.
+            </div>
+          )}
+          {updateStatus === "error" && (
+            <div className={styles.proxyTimestamp}>
+              <CircleAlert className="w-3.5 h-3.5 inline mr-1.5 text-amber-400" />
+              Could not reach GitHub to check for updates. Try again in a moment.
+            </div>
           )}
         </div>
 

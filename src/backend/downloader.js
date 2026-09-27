@@ -700,6 +700,7 @@ class Downloader {
 
       let lastTime = Date.now();
       let lastBytes = 0;
+      let emittedOnce = false;
 
       const updateProgress = () => {
         const downloaded = Math.min(totalBytes, (resumeFrom || 0) + chunkBytes.reduce((a, b) => a + b, 0));
@@ -711,6 +712,13 @@ class Downloader {
           downloadItem.speed = (downloaded - lastBytes) / td;
           lastBytes = downloaded;
           lastTime = now;
+          emittedOnce = true;
+          this._emitProgress();
+        } else if (!emittedOnce) {
+          // Always publish the very first chunk. Without this a transfer that
+          // finishes in under SPEED_SAMPLE_INTERVAL_MS never emits at all, so
+          // the meter sat at 0% and then snapped straight to 100%.
+          emittedOnce = true;
           this._emitProgress();
         }
       };
@@ -896,6 +904,7 @@ class Downloader {
       let downloadedBytes = resumeFrom || 0;
       let lastTime = Date.now();
       let lastBytes = downloadedBytes;
+      let emittedOnce = false;
 
       data.on('data', (chunk) => {
         if (downloadItem.status === 'cancelled') {
@@ -914,6 +923,11 @@ class Downloader {
           downloadItem.speed = (downloadedBytes - lastBytes) / timeDiff;
           lastBytes = downloadedBytes;
           lastTime = currentTime;
+          emittedOnce = true;
+          this._emitProgress();
+        } else if (!emittedOnce) {
+          // Publish the first chunk immediately (see _performHttpDownload).
+          emittedOnce = true;
           this._emitProgress();
         }
       });
@@ -1038,6 +1052,7 @@ class Downloader {
 
       let lastTime = Date.now();
       let lastBytes = 0;
+      let emittedOnce = false;
 
       torrent.on('download', (bytes) => {
         downloadItem.downloadedBytes = torrent.downloaded;
@@ -1049,7 +1064,11 @@ class Downloader {
           downloadItem.speed = (torrent.downloaded - lastBytes) / timeDiff;
           lastBytes = torrent.downloaded;
           lastTime = currentTime;
-          
+          emittedOnce = true;
+          this._emitProgress();
+        } else if (!emittedOnce) {
+          // Publish the first chunk immediately (see _performHttpDownload).
+          emittedOnce = true;
           this._emitProgress();
         }
       });
@@ -1287,6 +1306,22 @@ class Downloader {
     
     item.setSavePath(filePath);
 
+    // Electron's DownloadItem is a live handle, and several of its accessors
+    // throw or return a sentinel when the value is not known yet.
+    // getTotalBytes() reports -1 (and getReceivedBytes() can report 0) while
+    // the response headers are still unparsed, so negatives must be treated as
+    // "unknown" and collapsed to 0. Wrap the calls too so a throw can never
+    // break the download state machine.
+    const safeNum = (fn, fallback = 0) => {
+      try {
+        const value = fn();
+        if (typeof value !== 'number' || !isFinite(value) || value < 0) return fallback;
+        return value;
+      } catch (e) {
+        return fallback;
+      }
+    };
+
     const downloadItem = {
       id,
       url: item.getURL(),
@@ -1296,18 +1331,20 @@ class Downloader {
       status: 'downloading',
       progress: 0,
       downloadedBytes: 0,
-      totalBytes: item.getTotalBytes(),
+      totalBytes: safeNum(() => item.getTotalBytes()),
       speed: 0,
       type: 'electron',
       electronItem: item
     };
-    
+
     this.downloads.set(id, downloadItem);
     db.addDownloadToHistory(downloadItem);
     this._emitProgress();
 
     let lastTime = Date.now();
     let lastBytes = 0;
+    let emittedOnce = false;
+    let lastEmitTick = 0;
 
     item.on('updated', (event, state) => {
       if (state === 'interrupted') {
@@ -1318,21 +1355,44 @@ class Downloader {
           downloadItem.status = 'paused';
         } else {
           downloadItem.status = 'downloading';
-          downloadItem.downloadedBytes = item.getReceivedBytes();
+          downloadItem.downloadedBytes = safeNum(() => item.getReceivedBytes());
+
+          // The total size is usually NOT known when 'will-download' fires —
+          // Electron reports 0 (or -1) until the response headers have been
+          // parsed, and servers using chunked transfer encoding never report
+          // it at all. Reading it once at construction time therefore left
+          // totalBytes at 0 for the whole transfer, so the percentage was
+          // never computed and the meter sat at 0% before snapping to 100%
+          // the instant the file finished. Re-read it on every tick so the
+          // meter starts moving as soon as the real size is available.
+          const latestTotal = safeNum(() => item.getTotalBytes());
+          if (latestTotal > 0) downloadItem.totalBytes = latestTotal;
+
           if (downloadItem.totalBytes > 0) {
-            downloadItem.progress = (item.getReceivedBytes() / downloadItem.totalBytes) * 100;
+            downloadItem.progress = Math.min(
+              100,
+              Math.max(0, (downloadItem.downloadedBytes / downloadItem.totalBytes) * 100)
+            );
           }
 
           const currentTime = Date.now();
           const timeDiff = (currentTime - lastTime) / 1000;
           if (timeDiff >= 1) {
-            downloadItem.speed = (item.getReceivedBytes() - lastBytes) / timeDiff;
-            lastBytes = item.getReceivedBytes();
+            downloadItem.speed = Math.max(0, (downloadItem.downloadedBytes - lastBytes) / timeDiff);
+            lastBytes = downloadItem.downloadedBytes;
             lastTime = currentTime;
           }
         }
       }
-      this._emitProgress();
+
+      // Throttle the flood of 'updated' ticks, but never swallow the FIRST
+      // one: a short transfer would otherwise emit nothing until completion.
+      const nowTick = Date.now();
+      if (nowTick - lastEmitTick >= 250 || !emittedOnce) {
+        lastEmitTick = nowTick;
+        emittedOnce = true;
+        this._emitProgress();
+      }
     });
 
     item.once('done', (event, state) => {

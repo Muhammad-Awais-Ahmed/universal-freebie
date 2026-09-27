@@ -1,6 +1,6 @@
 {
   "name": "universal-freebie",
-  "version": "1.0.0",
+  "version": "1.0.17",
   "description": "Universal Freebie - Game download manager (Electron + Next.js)",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
@@ -16,7 +16,9 @@
     "package:dir": "next build && electron-builder --dir",
     "test:cleanup": "node tools/test-cleanup-guard.js",
     "test:deps": "node tools/test-dependency-detection.js",
+    "test:downloads": "node tools/test-download-progress-logic.js",
     "test:model": "node tools/test-model-fallback-logic.js",
+    "test:update": "node tools/test-update-version-logic.js",
     "render:status": "node tools/render-env.js status",
     "render:unlock": "node tools/render-env.js remove-token --apply"
   },
@@ -69,7 +71,9 @@
       "artifactName": "Universal-Freebie-Setup-${version}.${ext}",
       "signAndEditExecutable": true,
       "signtoolOptions": {
-        "signingHashAlgorithms": ["sha256"],
+        "signingHashAlgorithms": [
+          "sha256"
+        ],
         "rfc3161TimeStampServer": "http://timestamp.digicert.com"
       }
     },

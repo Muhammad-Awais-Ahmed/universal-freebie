@@ -32,11 +32,36 @@ let updateDownloaded = false;
 let updateCheckInProgress = false;
 let latestGitHubRelease = null;
 let pendingUpdatePath = null;
+let skippedVersion = null;
 
 function sendUpdateEvent(channel, payload = {}) {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send(channel, payload);
   }
+}
+
+// Turns "1.0.17", "v1.0.17" or "1.0.17-beta.2" into [1,0,17] so two
+// releases can be compared. Returns null when the string is not a version.
+function parseVersion(value) {
+  const match = String(value || '').trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+// True when `candidate` is strictly newer than `current`. Compared
+// numerically, not lexically, so 1.0.10 correctly beats 1.0.9. An
+// unparseable candidate is treated as newer so a renamed or unusual tag
+// is surfaced rather than silently hidden.
+function isNewerVersion(candidate, current) {
+  const next = parseVersion(candidate);
+  const now = parseVersion(current);
+  if (!next) return true;
+  if (!now) return true;
+
+  for (let i = 0; i < 3; i += 1) {
+    if (next[i] !== now[i]) return next[i] > now[i];
+  }
+  return false;
 }
 
 async function fetchLatestGitHubRelease() {
@@ -87,6 +112,37 @@ async function downloadGitHubReleaseAsset(assetUrl, fileName) {
   return finalPath;
 }
 
+// True when the user already pressed "Later" on this exact release. The
+// comparison is against the version being offered, not the running build,
+// so dismissing 1.0.17 keeps it quiet for 1.0.17 but a genuine 1.0.18
+// release still shows the dialog.
+function isUpdateSkipped(releaseVersion) {
+  const target = parseVersion(releaseVersion);
+  const candidates = [skippedVersion];
+
+  try {
+    candidates.push(db.getSettings().updateSkippedVersion);
+  } catch (error) {
+    // Settings unavailable; the in-memory value above is still usable.
+  }
+
+  return candidates.some((candidate) => {
+    const skipped = parseVersion(candidate);
+    if (!skipped || !target) return false;
+    return skipped[0] === target[0] && skipped[1] === target[1] && skipped[2] === target[2];
+  });
+}
+
+// Marks a version as dismissed so the dialog stops coming back for it.
+function skipUpdate(version) {
+  skippedVersion = version;
+  try {
+    db.updateSettings({ updateSkippedVersion: version });
+  } catch (error) {
+    console.error('[updater] could not remember skipped version:', error);
+  }
+}
+
 async function checkLatestRelease() {
   try {
     updateCheckInProgress = true;
@@ -95,6 +151,21 @@ async function checkLatestRelease() {
     const release = await fetchLatestGitHubRelease();
     latestGitHubRelease = release;
     updateCheckInProgress = false;
+
+    // A fresh install is exactly when this dialog is most annoying. Only
+    // mention an update when the published release really is newer than
+    // the running build, otherwise every new install is told to "update"
+    // to the version it already has.
+    if (!isNewerVersion(release.version, app.getVersion())) {
+      sendUpdateEvent('update-not-available');
+      return { status: 'not-available' };
+    }
+
+    // Respect a "Later" the user already clicked for this same version.
+    if (isUpdateSkipped(release.version)) {
+      sendUpdateEvent('update-not-available');
+      return { status: 'skipped' };
+    }
 
     sendUpdateEvent('update-available', {
       version: release.version,
@@ -153,9 +224,13 @@ function initAutoUpdater() {
     sendUpdateEvent('update-error', { message: error.message || String(error) });
   });
 
-  setTimeout(() => {
-    checkLatestRelease();
-  }, 4000);
+  // Updates are deliberately NOT checked automatically. This used to run a
+  // lookup four seconds after launch, which meant every single start raised
+  // the update screen even when the running build already was the newest
+  // release. Nothing here triggers a check any more: the only way to reach
+  // the update screen is the explicit "Check for Updates" button in
+  // Settings, and even that stays quiet unless the published release is
+  // genuinely newer than this build.
 }
 
 // ---------------------------------------------------------------
@@ -277,9 +352,21 @@ ipcMain.handle('update:check', async () => {
   return checkLatestRelease();
 });
 
+// Lets the Settings page show which build is actually running. Without this
+// the user cannot tell that they are already on the newest release.
+ipcMain.handle('app:version', () => ({
+  version: app.getVersion(),
+}));
+
 ipcMain.handle('update:check-latest', async () => {
   if (updateCheckInProgress) return { status: 'checking' };
   return checkLatestRelease();
+});
+
+ipcMain.handle('update:skip', async (_event, version) => {
+  const target = version || (latestGitHubRelease && latestGitHubRelease.version) || app.getVersion();
+  skipUpdate(target);
+  return { status: 'skipped', version: target };
 });
 
 app.on('window-all-closed', function () {

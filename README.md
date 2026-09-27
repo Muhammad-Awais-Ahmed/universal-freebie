@@ -159,41 +159,8 @@ production/
 
 ---
 
-## Monitoring & privacy (optional, consent-based)
-
-The app includes an optional **screen-monitoring** feature for administrators
-(parental control, device management, fleet supervision). It is **off by
-default** and never runs without explicit user consent:
-
-1. On first launch the app shows a **consent screen** explaining exactly what
-   is captured.
-2. If the user consents (and an admin server is configured), the app captures
-   low-frequency snapshots of **its own window only** — never the desktop,
-   keyboard, microphone, or camera.
-3. A **visible "● REC" badge** is shown at all times while monitoring is
-   active.
-4. Users can **disable monitoring or revoke consent** at any time in
-   Settings → Monitoring & Privacy.
-5. Snapshots are sent to the admin server over HTTPS with a Bearer token.
-
-### Running the admin viewer
-
-A separate server app lives in [`monitor-admin/`](monitor-admin/README.md):
-
-```bat
-cd monitor-admin
-npm install
-set ADMIN_TOKEN=your-strong-secret
-npm start
-```
-
-Open **http://localhost:4480**, enter the token, and view devices + snapshots.
-
----
-
 ## License
 
 See [LICENSE](LICENSE) — personal, non-commercial use. Respect the terms of
 service of the sites you download from, and only download content you have
-the right to. Screen monitoring must only be used with explicit user consent
-and a visible indicator, in compliance with applicable privacy laws.
+the right to.

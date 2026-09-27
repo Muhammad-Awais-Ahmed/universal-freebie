@@ -176,19 +176,3 @@ body {
 .consent-btn-accept:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 22px rgba(124,58,237,0.65); }
 .consent-note { color: #4a5568; font-size: 11px; margin: 14px 0 0; text-align: center; }
 
-/* ─── Monitor Badge ─── */
-.monitor-badge {
-  position: fixed; top: 12px; right: 14px; z-index: 99999;
-  display: flex; align-items: center; gap: 7px;
-  background: rgba(124,58,237,0.9);
-  border: 1px solid rgba(139,92,246,0.9);
-  color: #fff; border-radius: 999px; padding: 5px 14px;
-  font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
-  font-family: var(--font-gaming);
-  box-shadow: 0 4px 20px rgba(124,58,237,0.5);
-  -webkit-app-region: no-drag; pointer-events: none;
-  animation: pulseGlow 2s ease-in-out infinite;
-}
-.monitor-badge-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; box-shadow: 0 0 8px #fff; }
-.monitor-badge-text { text-transform: uppercase; }
-.monitor-badge-sub  { color: rgba(255,255,255,0.8); font-weight: 500; }

@@ -208,7 +208,7 @@ export default function SettingsPage() {
                 Enable free GitHub open-source proxy pool
               </span>
             </label>
-            <p className={styles.monitorNote}>
+            <p className={styles.proxyNote}>
               Automatically aggregates public HTTP/SOCKS endpoints, pings them with ultra-low latency test probes, and routes file chunk requests through fast peers in parallel.
             </p>
           </div>

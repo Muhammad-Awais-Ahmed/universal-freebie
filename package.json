@@ -16,6 +16,7 @@
     "package:dir": "next build && electron-builder --dir",
     "test:cleanup": "node tools/test-cleanup-guard.js",
     "test:deps": "node tools/test-dependency-detection.js",
+    "test:model": "node tools/test-model-fallback-logic.js",
     "render:status": "node tools/render-env.js status",
     "render:unlock": "node tools/render-env.js remove-token --apply"
   },

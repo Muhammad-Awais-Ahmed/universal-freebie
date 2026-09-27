@@ -10,8 +10,10 @@ services:
     envVars:
       - key: NVIDIA_NIM_API_KEY
         sync: false
+      # First model tried. If NVIDIA retires it the service walks the built-in
+      # fallback list automatically, so a retirement is not an outage.
       - key: NVIDIA_NIM_MODEL
-        value: meta/llama-3.1-8b-instruct
+        value: google/gemma-3-12b-it
       # The service is intentionally public: no client token. The per-IP rate
       # limit below is what protects it, since any token shipped inside a
       # desktop app would be public anyway. Add AI_CLIENT_TOKEN here only if

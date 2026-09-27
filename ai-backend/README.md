@@ -31,7 +31,7 @@ its existing logic:
 ```json
 {
   "object": "chat.completion",
-  "model": "meta/llama-3.1-8b-instruct",
+  "model": "google/gemma-3-12b-it",
   "choices": [
     {
       "index": 0,
@@ -50,12 +50,37 @@ its existing logic:
 | Variable               | Required | Default                        | Description                                  |
 | ---------------------- | -------- | ------------------------------ | -------------------------------------------- |
 | `NVIDIA_NIM_API_KEY`   | yes      | —                              | NVIDIA NIM API key (never exposed to client) |
-| `NVIDIA_NIM_MODEL`     | no       | `meta/llama-3.1-8b-instruct`   | Model identifier                              |
+| `NVIDIA_NIM_MODEL`     | no       | `google/gemma-3-12b-it`        | First model tried (see fallback below)       |
 | `NVIDIA_NIM_BASE_URL`  | no       | NIM chat completions endpoint   | Override endpoint if needed                   |
 | `AI_CLIENT_TOKEN`      | no       | —                              | If set, clients must send `X-App-Token`       |
 | `AI_REQUEST_LIMIT`     | no       | `30`                           | Requests per IP per window                    |
 | `AI_REQUEST_WINDOW_MS` | no       | `3600000`                      | Rate limit window in ms                       |
 | `PORT`                 | no       | `4480`                         | Listen port                                   |
+
+## Model selection and retirement
+
+NVIDIA retires hosted models without warning, and a retired id answers
+`410 Gone`. Rather than let that silently break installer detection, the
+service tries `NVIDIA_NIM_MODEL` first and then walks a built-in fallback list
+until one answers. The winner is remembered for the life of the process, so a
+retirement costs one extra request rather than one per request.
+
+Only `404`, `410`, and `503` advance the chain. Everything else, such as a bad
+key or a rate limit, is surfaced immediately, so a real problem is never
+masked by retries.
+
+`GET /api/health` reports both the configured model and the one currently
+answering:
+
+```json
+{
+  "ok": true,
+  "aiConfigured": true,
+  "model": "google/gemma-3-12b-it",
+  "configuredModel": "google/gemma-3-12b-it",
+  "clientTokenRequired": false
+}
+```
 
 ## Run locally
 
@@ -103,6 +128,31 @@ Steps:
 The app already targets this URL by default and needs **no key and no token**.
 To point it elsewhere, set `UNIVERSAL_FREEBIE_AI_URL` before launching the
 desktop app.
+
+## Model selection and retirement
+
+NVIDIA retires hosted models without warning, and a retired id answers
+`410 Gone`. Rather than let that silently break installer detection, the
+service tries `NVIDIA_NIM_MODEL` first and then walks a built-in fallback list
+until one answers. The winner is remembered for the life of the process, so a
+retirement costs one extra request rather than one per request.
+
+Only `404`, `410`, and `503` advance the chain. Everything else, such as a bad
+key or a rate limit, is surfaced immediately so a real problem is never masked
+by retries.
+
+`GET /api/health` reports both the configured model and the one currently
+answering:
+
+```json
+{
+  "ok": true,
+  "aiConfigured": true,
+  "model": "google/gemma-3-12b-it",
+  "configuredModel": "google/gemma-3-12b-it",
+  "clientTokenRequired": false
+}
+```
 
 ## Security notes
 

@@ -26,8 +26,24 @@ const PORT = process.env.PORT || 4480;
 const NIM_ENDPOINT =
   process.env.NVIDIA_NIM_BASE_URL || 'https://integrate.api.nvidia.com/v1/chat/completions';
 const NIM_KEY = (process.env.NVIDIA_NIM_API_KEY || '').trim();
-const NIM_MODEL = process.env.NVIDIA_NIM_MODEL || 'meta/llama-3.1-8b-instruct';
 const CLIENT_TOKEN = (process.env.AI_CLIENT_TOKEN || '').trim();
+
+// NVIDIA retires hosted models without warning; a retired id answers 410 Gone
+// and the whole feature would look broken. The configured model is tried
+// first, then these in order until one answers. The first model that works is
+// remembered so the fallback list is only walked on the failure that matters.
+//
+// The default is kept as the first entry rather than being a bare fallback so
+// the health endpoint keeps reporting whatever the operator configured. If that
+// id is retired, the chain simply moves on to the next one.
+const MODEL_FALLBACKS = [
+  process.env.NVIDIA_NIM_MODEL || 'google/gemma-3-12b-it',
+  'google/gemma-3-4b-it',
+  'mistralai/mistral-7b-instruct-v0.3',
+  'nvidia/mistral-nemo-12b-instruct',
+  'ibm/granite-3.0-8b-instruct',
+];
+let preferredModel = MODEL_FALLBACKS[0];
 
 // Per-IP rate limit is the real protection. A shared token cannot protect a
 // desktop app, because any app-shipped token is public the moment it ships.
@@ -81,12 +97,79 @@ function parseModelJson(content) {
   return parsed;
 }
 
+// Walks the configured model first, then the fallback list. A 404/410 means the
+// id is gone, so the next candidate is tried; anything else is returned as-is so
+// real problems (bad key, rate limit) are not masked by a retry.
+async function requestNim({ gameTitle, source, files }) {
+  const candidates = [preferredModel, ...MODEL_FALLBACKS].filter(
+    (model, index, all) => model && all.indexOf(model) === index
+  );
+
+  let lastResponse = null;
+  for (const model of candidates) {
+    let response;
+    try {
+      response = await fetch(NIM_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${NIM_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0,
+          max_tokens: 500,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            {
+              role: 'user',
+              content: JSON.stringify({
+                gameTitle: String(gameTitle || 'Unknown game').slice(0, 200),
+                source: String(source || 'Unknown').slice(0, 80),
+                files,
+              }),
+            },
+          ],
+        }),
+      });
+    } catch (error) {
+      return lastResponse || { ok: false, status: 503, modelUsed: model, text: async () => error.message };
+    }
+
+    if (response.ok) {
+      // Remember the winner so a retired model costs one extra call, not one
+      // per request, until the service restarts.
+      if (model !== preferredModel) {
+        console.log(`[ai] switched to model ${model} (${preferredModel} was unavailable)`);
+        preferredModel = model;
+      }
+      response.modelUsed = model;
+      return response;
+    }
+
+    const status = response.status;
+    const detail = await response.text().catch(() => '');
+    console.error(`[ai] model ${model} responded ${status}: ${String(detail).slice(0, 200)}`);
+
+    if (status === 404 || status === 410 || status === 503) {
+      lastResponse = { ok: false, status, modelUsed: model, text: async () => detail };
+      continue; // Try the next candidate.
+    }
+
+    return response; // Bad key, rate limit, etc. Surface it immediately.
+  }
+
+  return lastResponse || { ok: false, status: 502, modelUsed: null, text: async () => 'No model available.' };
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     service: 'universal-freebie-ai',
     aiConfigured: Boolean(NIM_KEY),
-    model: NIM_MODEL,
+    model: preferredModel,
+    configuredModel: MODEL_FALLBACKS[0],
     clientTokenRequired: Boolean(CLIENT_TOKEN),
   });
 });
@@ -113,30 +196,7 @@ app.post('/api/ai/install-plan', aiLimiter, async (req, res) => {
 
   const startedAt = Date.now();
   try {
-    const nimResponse = await fetch(NIM_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${NIM_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: NIM_MODEL,
-        temperature: 0,
-        max_tokens: 500,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          {
-            role: 'user',
-            content: JSON.stringify({
-              gameTitle: String(gameTitle || 'Unknown game').slice(0, 200),
-              source: String(source || 'Unknown').slice(0, 80),
-              files: safeFiles,
-            }),
-          },
-        ],
-      }),
-    });
+    const nimResponse = await requestNim({ gameTitle, source, files: safeFiles });
 
     if (!nimResponse.ok) {
       const detail = await nimResponse.text();
@@ -158,7 +218,7 @@ app.post('/api/ai/install-plan', aiLimiter, async (req, res) => {
       id: `uf-${Date.now().toString(36)}`,
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
-      model: NIM_MODEL,
+      model: nimResponse.modelUsed || preferredModel,
       choices: [
         {
           index: 0,
@@ -174,6 +234,8 @@ app.post('/api/ai/install-plan', aiLimiter, async (req, res) => {
   } catch (error) {
     console.error('[ai] install-plan error:', error.message);
     return res.status(502).json({ error: 'AI service request failed.' });
+  } finally {
+    console.log(`[ai] install-plan took ${Date.now() - startedAt}ms`);
   }
 });
 
@@ -184,7 +246,8 @@ app.listen(PORT, () => {
   console.log('  Universal Freebie AI Backend');
   console.log(`  Listening   : http://localhost:${PORT}`);
   console.log(`  AI configured: ${NIM_KEY ? 'yes' : 'no (set NVIDIA_NIM_API_KEY)'}`);
-  console.log(`  Model        : ${NIM_MODEL}`);
+  console.log(`  Model        : ${preferredModel}`);
+  console.log(`  Fallbacks    : ${MODEL_FALLBACKS.slice(1).join(', ') || 'none'}`);
   console.log(`  Client token : ${CLIENT_TOKEN ? 'required' : 'not required'}`);
   console.log('==============================================');
 });

@@ -8,7 +8,9 @@ const NIM_ENDPOINT = process.env.NVIDIA_NIM_BASE_URL || 'https://integrate.api.n
 // protected by the backend's per-IP rate limit rather than by a shared secret,
 // because a desktop app could never keep one secret anyway.
 const AI_PROXY_URL = process.env.UNIVERSAL_FREEBIE_AI_URL || 'https://universal-freebie-ai.onrender.com/api/ai/install-plan';
-const NIM_MODEL = process.env.NVIDIA_NIM_MODEL || 'meta/llama-3.1-8b-instruct';
+// Only used for the direct-to-NIM fallback, which the app never takes while the
+// hosted service is reachable. Match the hosted service's first choice.
+const NIM_MODEL = process.env.NVIDIA_NIM_MODEL || 'google/gemma-3-12b-it';
 const MAX_FILES = 250;
 
 // Folders are split on purpose: archives are staged in `Installs`, the

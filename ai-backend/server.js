@@ -12,7 +12,8 @@
  * Environment:
  *   NVIDIA_NIM_API_KEY   (required) NVIDIA NIM API key
  *   NVIDIA_NIM_MODEL     (optional) default meta/llama-3.1-8b-instruct
- *   AI_CLIENT_TOKEN      (optional) shared token the app must send
+ *   AI_CLIENT_TOKEN      (optional) shared token the app must send. Leave unset
+ *                        to keep the service open, which is the default.
  *   AI_REQUEST_LIMIT     (optional) requests per IP per window, default 30
  *   AI_REQUEST_WINDOW_MS (optional) rate limit window, default 1 hour
  *   PORT                 (optional) defaults to 4480
@@ -28,6 +29,8 @@ const NIM_KEY = (process.env.NVIDIA_NIM_API_KEY || '').trim();
 const NIM_MODEL = process.env.NVIDIA_NIM_MODEL || 'meta/llama-3.1-8b-instruct';
 const CLIENT_TOKEN = (process.env.AI_CLIENT_TOKEN || '').trim();
 
+// Per-IP rate limit is the real protection. A shared token cannot protect a
+// desktop app, because any app-shipped token is public the moment it ships.
 const REQUEST_LIMIT = Number(process.env.AI_REQUEST_LIMIT || 30);
 const REQUEST_WINDOW_MS = Number(process.env.AI_REQUEST_WINDOW_MS || 60 * 60 * 1000);
 const requestLog = new Map();

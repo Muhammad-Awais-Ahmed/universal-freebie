@@ -4,12 +4,10 @@ const https = require('https');
 const { spawn } = require('child_process');
 
 const NIM_ENDPOINT = process.env.NVIDIA_NIM_BASE_URL || 'https://integrate.api.nvidia.com/v1/chat/completions';
+// The hosted AI service is public: no key, no token, no account. Access is
+// protected by the backend's per-IP rate limit rather than by a shared secret,
+// because a desktop app could never keep one secret anyway.
 const AI_PROXY_URL = process.env.UNIVERSAL_FREEBIE_AI_URL || 'https://universal-freebie-ai.onrender.com/api/ai/install-plan';
-// A desktop app cannot keep a shared secret secret, so the app token is a
-// convenience default rather than a real trust boundary. Protection comes from
-// the per-IP rate limit and the request cap in the backend. Users on their own
-// deployment can override it in Settings or with UNIVERSAL_FREEBIE_AI_TOKEN.
-const DEFAULT_PROXY_TOKEN = '';
 const NIM_MODEL = process.env.NVIDIA_NIM_MODEL || 'meta/llama-3.1-8b-instruct';
 const MAX_FILES = 250;
 
@@ -288,17 +286,10 @@ function extractPlan(payload) {
   return parseJson(payload && payload.choices && payload.choices[0] && payload.choices[0].message.content);
 }
 
-async function planInstall({ filePath, gameTitle, source, token }) {
+async function planInstall({ filePath, gameTitle, source }) {
   const apiKey = getApiKey();
-  // A token entered in Settings wins; otherwise fall back to the packaged
-  // default. Without one the Render service answers 401, so surface that
-  // clearly instead of failing with a confusing parse error.
-  const appToken = token || process.env.UNIVERSAL_FREEBIE_AI_TOKEN || DEFAULT_PROXY_TOKEN;
   if (!AI_PROXY_URL && !apiKey) {
-    return { error: 'NVIDIA NIM is not configured. Set NVIDIA_NIM_API_KEY in the terminal before starting the app.' };
-  }
-  if (AI_PROXY_URL && !appToken) {
-    return { error: 'The AI service token is missing. Add it in Settings → AI Automatic Installation.' };
+    return { error: 'The AI service is unreachable. Check your connection and try again.' };
   }
   if (!fs.existsSync(filePath)) return { error: 'The downloaded file is no longer available.' };
 
@@ -335,8 +326,10 @@ async function planInstall({ filePath, gameTitle, source, token }) {
   const response = await fetch(AI_PROXY_URL || NIM_ENDPOINT, {
     method: 'POST',
     headers: {
-      ...(AI_PROXY_URL ? { 'X-App-Token': appToken } : { Authorization: `Bearer ${apiKey}` }),
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      // Only the direct-NIM fallback path needs a key; the hosted service
+      // already holds one server-side and is called without credentials.
+      ...(!AI_PROXY_URL ? { Authorization: `Bearer ${apiKey}` } : {})
     },
     body: JSON.stringify(AI_PROXY_URL ? requestBody : {
       model: NIM_MODEL,
@@ -358,7 +351,13 @@ async function planInstall({ filePath, gameTitle, source, token }) {
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(`NVIDIA NIM request failed (${response.status}): ${detail.slice(0, 240)}`);
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(
+        'The AI service rejected this request and is still asking for an app token. '
+        + 'The app no longer sends one, so the hosted service needs its AI_CLIENT_TOKEN variable removed.'
+      );
+    }
+    throw new Error(`AI request failed (${response.status}): ${detail.slice(0, 240)}`);
   }
   const payload = await response.json();
   const result = extractPlan(payload);

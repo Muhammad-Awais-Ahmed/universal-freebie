@@ -92,22 +92,26 @@ Steps:
 2. In Render choose **New → Blueprint** and select the repo.
 3. When prompted, set:
    - `NVIDIA_NIM_API_KEY` (required, secret)
-   - `AI_CLIENT_TOKEN` (recommended, secret)
+   - `AI_CLIENT_TOKEN` (optional — only for a private deployment)
 4. Deploy, then confirm:
 
    ```
    https://universal-freebie-ai.onrender.com/api/health
-   → { "ok": true, "aiConfigured": true, ... }
+   → { "ok": true, "aiConfigured": true, "clientTokenRequired": false, ... }
    ```
 
-The app already targets this URL by default. To point it elsewhere, set
-`UNIVERSAL_FREEBIE_AI_URL` (and optionally `UNIVERSAL_FREEBIE_AI_TOKEN`)
-before launching the desktop app.
+The app already targets this URL by default and needs **no key and no token**.
+To point it elsewhere, set `UNIVERSAL_FREEBIE_AI_URL` before launching the
+desktop app.
 
 ## Security notes
 
-- The NVIDIA key is only read from the server environment.
-- Requests are rate limited per IP.
+- The NVIDIA key is only read from the server environment and is never shipped
+  to or visible in the desktop app.
+- Requests are rate limited per IP, which is what protects a public service.
+- A shared client token is not a real boundary for a desktop app: any token
+  shipped inside the app is public the moment the app ships. `AI_CLIENT_TOKEN`
+  therefore exists for private deployments, not for the public one.
 - The model is instructed to return JSON only, and the client re-validates any
   returned path before running it (must exist locally, be a relative path
   inside the download, and end in `.exe` or `.msi`).

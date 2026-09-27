@@ -129,8 +129,7 @@ class AutoInstaller extends EventEmitter {
     const plan = await planInstall({
       filePath,
       gameTitle: item.filename,
-      source: item.source,
-      token: settings.aiServiceToken || undefined
+      source: item.source
     });
 
     if (!plan || plan.error) {

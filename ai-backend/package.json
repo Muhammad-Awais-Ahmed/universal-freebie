@@ -5,7 +5,7 @@
   "description": "Server-side NVIDIA NIM proxy for Universal Freebie AI installer detection",
   "main": "server.js",
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "scripts": {
     "start": "node server.js"

@@ -15,7 +15,9 @@
     "package": "next build && electron-builder --win",
     "package:dir": "next build && electron-builder --dir",
     "test:cleanup": "node tools/test-cleanup-guard.js",
-    "test:deps": "node tools/test-dependency-detection.js"
+    "test:deps": "node tools/test-dependency-detection.js",
+    "render:status": "node tools/render-env.js status",
+    "render:unlock": "node tools/render-env.js remove-token --apply"
   },
   "dependencies": {
     "axios": "^1.18.1",

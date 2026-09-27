@@ -49,7 +49,6 @@ export default function SettingsPage() {
   const [autoInstallDependencies, setAutoInstallDependencies] = useState(true);
   const [autoLaunchInstaller, setAutoLaunchInstaller] = useState(true);
   const [autoDeleteAfterInstall, setAutoDeleteAfterInstall] = useState(false);
-  const [aiServiceToken, setAiServiceToken] = useState("");
 
   useEffect(() => {
     loadSettings();
@@ -71,7 +70,6 @@ export default function SettingsPage() {
         setAutoInstallDependencies(settings.autoInstallDependencies !== false);
         setAutoLaunchInstaller(settings.autoLaunchInstaller !== false);
         setAutoDeleteAfterInstall(!!settings.autoDeleteAfterInstall);
-        setAiServiceToken(settings.aiServiceToken || "");
       }
       if (proxy) setProxyStatus(proxy);
     } catch (err) {
@@ -118,7 +116,6 @@ export default function SettingsPage() {
         autoInstallDependencies,
         autoLaunchInstaller,
         autoDeleteAfterInstall,
-        aiServiceToken: aiServiceToken.trim(),
       });
       const proxy = await ipcRenderer.invoke("get-proxy-status");
       if (proxy) setProxyStatus(proxy);
@@ -382,22 +379,8 @@ export default function SettingsPage() {
             </label>
             <p className={styles.proxyNote}>
               The AI inspects the finished download, picks the real installer, and starts it for you.
-              Games are only ever touched inside your download folder.
-            </p>
-          </div>
-
-          <div className={styles.field}>
-            <label className={styles.label}>AI Service Token</label>
-            <input
-              type="password"
-              className={styles.input}
-              value={aiServiceToken}
-              placeholder="X-App-Token for your AI backend"
-              onChange={(e) => setAiServiceToken(e.target.value)}
-            />
-            <p className={styles.proxyNote}>
-              Required by the hosted AI backend. Leave blank when running against your own
-              deployment with the token supplied by UNIVERSAL_FREEBIE_AI_TOKEN.
+              Games are only ever touched inside your download folder. No account or API key is
+              needed.
             </p>
           </div>
 

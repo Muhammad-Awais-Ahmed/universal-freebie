@@ -12,8 +12,10 @@ services:
         sync: false
       - key: NVIDIA_NIM_MODEL
         value: meta/llama-3.1-8b-instruct
-      - key: AI_CLIENT_TOKEN
-        sync: false
+      # The service is intentionally public: no client token. The per-IP rate
+      # limit below is what protects it, since any token shipped inside a
+      # desktop app would be public anyway. Add AI_CLIENT_TOKEN here only if
+      # you want a private deployment.
       - key: AI_REQUEST_LIMIT
         value: 30
       - key: AI_REQUEST_WINDOW_MS

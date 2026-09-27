@@ -152,6 +152,9 @@ class Downloader {
     this.mainWindow = mainWindow;
     this.downloads = new Map();
     this._childProcesses = new Map();
+    // Set by the main process. Called with the finished item whenever a
+    // download reaches 'completed', so the AI auto-installer can react.
+    this.onCompleted = null;
 
     try {
       this.torrentClient = new WebTorrent({
@@ -192,6 +195,39 @@ class Downloader {
 
   generateId() {
     return Math.random().toString(36).substr(2, 9);
+  }
+
+  /**
+   * Single funnel for every "download finished" path (yt-dlp, chunked HTTP,
+   * plain HTTP stream, torrent and Electron intercepts). Keeping this in one
+   * place means the AI auto-installer can never miss a completion.
+   */
+  _markCompleted(item) {
+    item.status = 'completed';
+    item.progress = 100;
+    item.speed = 0;
+
+    try {
+      db.addDownloadToHistory(item);
+      db.updateDownloadHistory(item.id, {
+        status: 'completed',
+        downloadedBytes: item.downloadedBytes || item.totalBytes,
+        totalBytes: item.totalBytes,
+        filename: item.filename
+      });
+    } catch (e) {}
+
+    this._emitProgress();
+    this._processQueue();
+    this._scheduleAutoRemove(item.id);
+
+    if (typeof this.onCompleted === 'function') {
+      // Never let a listener rejection break the download state machine.
+      try {
+        const result = this.onCompleted(item);
+        if (result && typeof result.catch === 'function') result.catch(() => {});
+      } catch (e) {}
+    }
   }
 
   startHttpDownload(url, filename, meta, resumeFrom) {
@@ -530,9 +566,6 @@ class Downloader {
       if (item.status === 'cancelled') return;
 
       if (code === 0) {
-        item.status = 'completed';
-        item.progress = 100;
-        item.speed = 0;
         try {
           if (!fs.existsSync(item.filePath)) {
             const possibleMerged = item.filePath.replace(/\.(?:f\d+|temp\w*)\./i, '.');
@@ -555,16 +588,7 @@ class Downloader {
           }
         } catch (e) {}
 
-        db.addDownloadToHistory(item);
-        db.updateDownloadHistory(item.id, {
-          status: 'completed',
-          downloadedBytes: item.downloadedBytes,
-          totalBytes: item.totalBytes,
-          filename: item.filename
-        });
-        this._emitProgress();
-        this._processQueue();
-        this._scheduleAutoRemove(item.id);
+        this._markCompleted(item);
       } else {
         item.status = 'error';
         item.error = lastErrorMsg || `yt-dlp download process exited with code ${code}`;
@@ -813,18 +837,7 @@ class Downloader {
           this._emitProgress();
           this._processQueue();
         } else {
-          downloadItem.status = 'completed';
-          downloadItem.progress = 100;
-          downloadItem.speed = 0;
-          db.addDownloadToHistory(downloadItem);
-          db.updateDownloadHistory(downloadItem.id, {
-            status: 'completed',
-            downloadedBytes: downloadItem.downloadedBytes || downloadItem.totalBytes,
-            totalBytes: downloadItem.totalBytes
-          });
-          this._emitProgress();
-          this._processQueue();
-          this._scheduleAutoRemove(id);
+          this._markCompleted(downloadItem);
         }
       }
     } catch (err) {
@@ -910,18 +923,7 @@ class Downloader {
       data.on('end', () => {
         if (downloadItem._writers) downloadItem._writers.delete(writer);
         if (downloadItem.status !== 'cancelled' && downloadItem.status !== 'error') {
-          downloadItem.status = 'completed';
-          downloadItem.progress = 100;
-          downloadItem.speed = 0;
-          db.addDownloadToHistory(downloadItem);
-          db.updateDownloadHistory(downloadItem.id, {
-            status: 'completed',
-            downloadedBytes: downloadItem.downloadedBytes || downloadItem.totalBytes,
-            totalBytes: downloadItem.totalBytes
-          });
-          this._emitProgress();
-          this._processQueue();
-          this._scheduleAutoRemove(downloadItem.id);
+          this._markCompleted(downloadItem);
         }
       });
 
@@ -1053,18 +1055,7 @@ class Downloader {
       });
 
       torrent.on('done', () => {
-        downloadItem.status = 'completed';
-        downloadItem.progress = 100;
-        downloadItem.speed = 0;
-        db.addDownloadToHistory(downloadItem);
-        db.updateDownloadHistory(downloadItem.id, {
-          status: 'completed',
-          downloadedBytes: downloadItem.totalBytes,
-          totalBytes: downloadItem.totalBytes
-        });
-        this._emitProgress();
-        this._processQueue();
-        this._scheduleAutoRemove(id);
+        this._markCompleted(downloadItem);
       });
       
       torrent.on('error', (err) => {
@@ -1346,16 +1337,7 @@ class Downloader {
 
     item.once('done', (event, state) => {
       if (state === 'completed') {
-        downloadItem.status = 'completed';
-        downloadItem.progress = 100;
-        downloadItem.speed = 0;
-        db.addDownloadToHistory(downloadItem);
-        db.updateDownloadHistory(downloadItem.id, {
-          status: 'completed',
-          downloadedBytes: downloadItem.totalBytes,
-          totalBytes: downloadItem.totalBytes
-        });
-        this._scheduleAutoRemove(downloadItem.id);
+        this._markCompleted(downloadItem);
       } else if (state === 'cancelled') {
         downloadItem.status = 'cancelled';
         db.updateDownloadHistory(downloadItem.id, {

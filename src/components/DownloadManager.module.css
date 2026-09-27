@@ -176,6 +176,79 @@
   animation: pulse 1.8s infinite;
 }
 
+.progressBarInstalling {
+  background: linear-gradient(90deg, #059669 0%, #34d399 100%);
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
+  animation: installPulse 1.6s infinite;
+}
+
+.progressBarError {
+  background: linear-gradient(90deg, #b91c1c 0%, #ef4444 100%);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+}
+
+@keyframes installPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* Auto-install strip: shows what the AI pipeline is doing right now. */
+.autoInstallRow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  border: 1px solid rgba(52, 211, 153, 0.22);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.autoInstallRowError {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.autoInstallIcon {
+  display: inline-flex;
+  align-items: center;
+  color: #34d399;
+  flex-shrink: 0;
+}
+
+.autoInstallRowError .autoInstallIcon {
+  color: #f87171;
+}
+
+.autoInstallPulse {
+  animation: installPulse 1.6s infinite;
+}
+
+.autoInstallText {
+  color: #a7f3d0;
+  font-size: 11px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.autoInstallRowError .autoInstallText {
+  color: #fecaca;
+}
+
+.autoInstallMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #6ee7b7;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }

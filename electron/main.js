@@ -14,9 +14,11 @@ const { searchFileCR } = require('../src/backend/providers/fileCR');
 const Downloader = require('../src/backend/downloader');
 const db = require('../src/backend/database');
 const proxyPool = require('../src/backend/proxyPool');
-const { planInstall, runInstaller } = require('../src/backend/aiInstaller');
+const { planInstall, runInstaller, installMissingDependencies, cleanupDownloadArtifacts, pruneEmptyStaging, STAGING_DIR_NAME } = require('../src/backend/aiInstaller');
+const { AutoInstaller } = require('../src/backend/autoInstall');
 
 let globalDownloader = null;
+let autoInstaller = null;
 
 // ---------------------------------------------------------------
 // Debug mode: shows the hidden automation windows (siteWindow,
@@ -185,6 +187,14 @@ function createWindow() {
   });
 
   globalDownloader = new Downloader(mainWindow);
+
+  // Any completed download kicks off the AI auto-install pipeline when the
+  // feature is enabled in Settings.
+  autoInstaller = new AutoInstaller(() => db.getSettings());
+  autoInstaller.on('progress', (state) => {
+    sendToAllWindows('auto-install-progress', state);
+  });
+  globalDownloader.onCompleted = (item) => autoInstaller.handleCompleted(item);
 
   mainWindow.webContents.session.on('will-download', (event, item, webContents) => {
     if (globalDownloader) {
@@ -2017,6 +2027,26 @@ ipcMain.handle('refresh-proxy-pool', async () => {
 
 ipcMain.handle('validate-proxy-pool', async () => {
   return await proxyPool.validateProxies();
+});
+
+// --- Automatic installation -------------------------------------------
+// Read-only view of the pipeline so the UI can re-hydrate after a reload.
+ipcMain.handle('get-auto-install-state', (event, downloadId) => {
+  if (!autoInstaller) return null;
+  return downloadId ? autoInstaller.getState(downloadId) : autoInstaller.getAllStates();
+});
+
+// Let the user start the pipeline by hand for a download that already
+// finished, and cancel a queued one that is only waiting on dependencies.
+ipcMain.handle('run-auto-install', async (event, downloadId) => {
+  if (!autoInstaller) return { ok: false, error: 'Automatic installation is unavailable.' };
+  if (!globalDownloader) return { ok: false, error: 'No downloader is running.' };
+  const item = globalDownloader.downloads.get(downloadId);
+  if (!item) return { ok: false, error: 'That download is no longer in the list.' };
+  // `force` lets the user start the pipeline manually even when the
+  // automatic trigger is switched off.
+  await autoInstaller.handleCompleted(item, { force: true });
+  return { ok: true };
 });
 
 ipcMain.handle('get-download-dir', () => {

@@ -13,7 +13,9 @@
     "electron": "set NODE_ENV=development&& electron .",
     "electron:dev": "concurrently \"next dev\" \"wait-on http://localhost:3000 && set NODE_ENV=development&& electron .\"",
     "package": "next build && electron-builder --win",
-    "package:dir": "next build && electron-builder --dir"
+    "package:dir": "next build && electron-builder --dir",
+    "test:cleanup": "node tools/test-cleanup-guard.js",
+    "test:deps": "node tools/test-dependency-detection.js"
   },
   "dependencies": {
     "axios": "^1.18.1",

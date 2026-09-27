@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import styles from "./DownloadManager.module.css";
 import { formatNumericBytes } from "@/utils/formatters";
-import { DownloadCloud, ChevronDown, ChevronUp, Square, RotateCcw, X, FolderOpen } from "lucide-react";
+import { DownloadCloud, ChevronDown, ChevronUp, Square, RotateCcw, X, FolderOpen, Bot, Play, Trash2 } from "lucide-react";
 
 interface DownloadItem {
   id: string;
@@ -16,11 +16,66 @@ interface DownloadItem {
   error?: string;
 }
 
+interface AutoInstallState {
+  downloadId: string;
+  phase: string;
+  message?: string;
+  error?: string;
+  filename?: string;
+  updatedAt: number;
+  removed?: string[];
+  dependenciesInstalled?: string[];
+  dependenciesFailed?: string[];
+}
+
+// Phases that mean work is still happening — the row must not auto-dismiss.
+const ACTIVE_PHASES = new Set([
+  "planning",
+  "installer-found",
+  "dependencies",
+  "dependency",
+  "dependency-download",
+  "dependency-installing",
+  "installing",
+  "cleaned"
+]);
+
+function isActiveInstall(state?: AutoInstallState | null): boolean {
+  if (!state) return false;
+  if (ACTIVE_PHASES.has(state.phase)) return true;
+  // A success that still has pending dependency work is not "done" yet.
+  return state.phase === "dependencies-done" && (state.dependenciesFailed?.length ?? 0) > 0;
+}
+
+const PHASE_LABELS: Record<string, string> = {
+  planning: "AI is choosing the installer",
+  "installer-found": "Installer identified",
+  dependencies: "Checking prerequisites",
+  dependency: "Installing prerequisite",
+  "dependency-download": "Downloading prerequisite",
+  "dependency-installing": "Setting up prerequisite",
+  "dependencies-done": "Prerequisites ready",
+  installing: "Installing game",
+  cleaned: "Done — files removed",
+  installed: "Installer started",
+  skipped: "No installer found",
+  "awaiting-manual-install": "Start it yourself",
+  "cleanup-skipped": "Files kept",
+  error: "Auto-install failed"
+};
+
 function formatBytes(bytes: number, decimals = 2): string {
   return formatNumericBytes(bytes, decimals);
 }
 
-function getStatusText(item: DownloadItem): string {
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function getStatusText(item: DownloadItem, auto?: AutoInstallState | null): string {
+  if (auto && auto.phase !== "planning") {
+    return PHASE_LABELS[auto.phase] || auto.phase;
+  }
   switch (item.status) {
     case "error":
       return item.error || "Failed";
@@ -40,6 +95,7 @@ export default function DownloadManager() {
   const [isVisible, setIsVisible] = useState(false);
   const isVisibleRef = useRef(false);
   const [completedTimer, setCompletedTimer] = useState<Record<string, number>>({});
+  const [autoInstall, setAutoInstall] = useState<Record<string, AutoInstallState>>({});
 
   useEffect(() => {
     isVisibleRef.current = isVisible;
@@ -54,15 +110,25 @@ export default function DownloadManager() {
         setIsVisible(true);
       }
     };
+    const installHandler = (_event: unknown, state: AutoInstallState) => {
+      if (!state || !state.downloadId) return;
+      setAutoInstall((prev) => ({ ...prev, [state.downloadId]: state }));
+      if (!isVisibleRef.current) setIsVisible(true);
+    };
     ipcRenderer.on("downloads-progress", handler);
+    ipcRenderer.on("auto-install-progress", installHandler);
     return () => {
       ipcRenderer.removeListener("downloads-progress", handler);
+      ipcRenderer.removeListener("auto-install-progress", installHandler);
     };
   }, []);
 
-  // Auto-dismiss completed items after 5s
+  // Auto-dismiss completed items after 5s, but never while the AI installer
+  // is still working on that download.
   useEffect(() => {
-    const completed = downloads.filter((d) => d.status === "completed");
+    const completed = downloads.filter(
+      (d) => d.status === "completed" && !isActiveInstall(autoInstall[d.id])
+    );
     if (completed.length === 0) return;
 
     const interval = setInterval(() => {
@@ -83,7 +149,7 @@ export default function DownloadManager() {
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [downloads]);
+  }, [downloads, autoInstall]);
 
   const invoke = (channel: string, ...args: unknown[]) => {
     if (window.require) {
@@ -124,23 +190,57 @@ export default function DownloadManager() {
           {filtered.length === 0 ? (
             <div className={styles.empty}>No active downloads in queue</div>
           ) : (
-            filtered.map((item) => (
+            filtered.map((item) => {
+              const auto = autoInstall[item.id];
+              const busy = isActiveInstall(auto);
+              return (
               <div key={item.id} className={styles.downloadItem}>
                 <div className={styles.itemHeader}>
                   <div className={styles.itemName} title={item.filename}>
                     {item.filename}
                   </div>
                   <div className={styles.itemStatus}>
-                    {getStatusText(item)}
+                    {getStatusText(item, auto)}
                   </div>
                 </div>
 
                 <div className={styles.progressContainer}>
                   <div
-                    className={`${styles.progressBar} ${styles[item.status] || ""}`}
+                    className={`${styles.progressBar} ${
+                      auto?.phase === "error"
+                        ? styles.progressBarError
+                        : busy
+                        ? styles.progressBarInstalling
+                        : styles[`progressBar${capitalize(item.status)}`] || ""
+                    }`}
                     style={{ width: `${item.progress}%` }}
                   />
                 </div>
+
+                {auto && (
+                  <div
+                    className={`${styles.autoInstallRow} ${
+                      auto.phase === "error" ? styles.autoInstallRowError : ""
+                    }`}
+                  >
+                    <span className={styles.autoInstallIcon}>
+                      {auto.phase === "error" ? (
+                        <X className="w-3 h-3" />
+                      ) : (
+                        <Bot className={`w-3 h-3 ${busy ? styles.autoInstallPulse : ""}`} />
+                      )}
+                    </span>
+                    <span className={styles.autoInstallText} title={auto.error || auto.message}>
+                      {auto.error || auto.message || PHASE_LABELS[auto.phase] || auto.phase}
+                    </span>
+                    {auto.removed && auto.removed.length > 0 && (
+                      <span className={styles.autoInstallMeta}>
+                        <Trash2 className="w-3 h-3" />
+                        {auto.removed.length}
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 <div className={styles.itemDetails}>
                   <span className={styles.sizeInfo}>
@@ -169,6 +269,18 @@ export default function DownloadManager() {
                         <RotateCcw className="w-3 h-3" /> Retry
                       </button>
                     )}
+                    {item.status === "completed" && !auto && (
+                      <button
+                        className={styles.retryBtn}
+                        title="Let the AI install this game"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          invoke("run-auto-install", item.id);
+                        }}
+                      >
+                        <Play className="w-3 h-3" /> Install
+                      </button>
+                    )}
                     {(item.status === "error" || item.status === "completed") && (
                       <button
                         className={styles.cancelBtn}
@@ -183,7 +295,8 @@ export default function DownloadManager() {
                   </div>
                 </div>
               </div>
-            ))
+              );
+            })
           )}
           <button
             className={styles.openFolderBtn}

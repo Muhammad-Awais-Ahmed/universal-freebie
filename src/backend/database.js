@@ -20,7 +20,12 @@ class Database {
     
     return {
       settings: {
-        downloadDirectory: path.join(app.getPath('downloads'), 'UniversalGameClient')
+        downloadDirectory: path.join(app.getPath('downloads'), 'UniversalGameClient'),
+        // Automatic installation is opt-in: nothing runs without consent.
+        autoInstallEnabled: false,
+        autoInstallDependencies: true,
+        autoLaunchInstaller: true,
+        autoDeleteAfterInstall: false
       },
       downloadHistory: [],
       installedGames: []

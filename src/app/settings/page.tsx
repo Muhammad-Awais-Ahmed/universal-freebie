@@ -11,7 +11,11 @@ import {
   CheckCircle2,
   Save,
   Loader2,
-  HardDrive
+  HardDrive,
+  Bot,
+  Package,
+  Rocket,
+  Trash2
 } from "lucide-react";
 
 interface ProxyStatus {
@@ -41,6 +45,11 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [refreshingProxies, setRefreshingProxies] = useState(false);
   const [validatingProxies, setValidatingProxies] = useState(false);
+  const [autoInstallEnabled, setAutoInstallEnabled] = useState(false);
+  const [autoInstallDependencies, setAutoInstallDependencies] = useState(true);
+  const [autoLaunchInstaller, setAutoLaunchInstaller] = useState(true);
+  const [autoDeleteAfterInstall, setAutoDeleteAfterInstall] = useState(false);
+  const [aiServiceToken, setAiServiceToken] = useState("");
 
   useEffect(() => {
     loadSettings();
@@ -58,6 +67,11 @@ export default function SettingsPage() {
         setMaxConcurrent(settings.maxConcurrent || 50);
         setMaxChunks(settings.maxChunks || 64);
         setProxyPoolEnabled(!!settings.proxyPoolEnabled);
+        setAutoInstallEnabled(!!settings.autoInstallEnabled);
+        setAutoInstallDependencies(settings.autoInstallDependencies !== false);
+        setAutoLaunchInstaller(settings.autoLaunchInstaller !== false);
+        setAutoDeleteAfterInstall(!!settings.autoDeleteAfterInstall);
+        setAiServiceToken(settings.aiServiceToken || "");
       }
       if (proxy) setProxyStatus(proxy);
     } catch (err) {
@@ -100,6 +114,11 @@ export default function SettingsPage() {
         maxConcurrent,
         maxChunks,
         proxyPoolEnabled,
+        autoInstallEnabled,
+        autoInstallDependencies,
+        autoLaunchInstaller,
+        autoDeleteAfterInstall,
+        aiServiceToken: aiServiceToken.trim(),
       });
       const proxy = await ipcRenderer.invoke("get-proxy-status");
       if (proxy) setProxyStatus(proxy);
@@ -339,6 +358,105 @@ export default function SettingsPage() {
                 ))}
               </div>
             </div>
+          )}
+        </div>
+
+        {/* AI Automatic Installation */}
+        <div className={styles.section}>
+          <h2 className={styles.sectionTitle}>
+            <Bot className="w-4 h-4 text-emerald-500" />
+            AI Automatic Installation
+          </h2>
+
+          <div className={styles.field}>
+            <label className={`${styles.label} flex items-center cursor-pointer select-none`}>
+              <input
+                type="checkbox"
+                checked={autoInstallEnabled}
+                onChange={(e) => setAutoInstallEnabled(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-emerald-600 focus:ring-emerald-500 mr-2.5"
+              />
+              <span className="text-slate-100 font-medium">
+                Install games automatically when a download finishes
+              </span>
+            </label>
+            <p className={styles.proxyNote}>
+              The AI inspects the finished download, picks the real installer, and starts it for you.
+              Games are only ever touched inside your download folder.
+            </p>
+          </div>
+
+          <div className={styles.field}>
+            <label className={styles.label}>AI Service Token</label>
+            <input
+              type="password"
+              className={styles.input}
+              value={aiServiceToken}
+              placeholder="X-App-Token for your AI backend"
+              onChange={(e) => setAiServiceToken(e.target.value)}
+            />
+            <p className={styles.proxyNote}>
+              Required by the hosted AI backend. Leave blank when running against your own
+              deployment with the token supplied by UNIVERSAL_FREEBIE_AI_TOKEN.
+            </p>
+          </div>
+
+          {autoInstallEnabled && (
+            <>
+              <div className={styles.field}>
+                <label className={`${styles.label} flex items-center cursor-pointer select-none`}>
+                  <input
+                    type="checkbox"
+                    checked={autoInstallDependencies}
+                    onChange={(e) => setAutoInstallDependencies(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-emerald-600 focus:ring-emerald-500 mr-2.5"
+                  />
+                  <span className="text-slate-100 font-medium flex items-center gap-2">
+                    <Package className="w-3.5 h-3.5" />
+                    Install missing prerequisites first
+                  </span>
+                </label>
+                <p className={styles.proxyNote}>
+                  Detects Visual C++ Redistributable, DirectX and .NET on this machine and silently
+                  installs only the ones that are actually missing, using a bundled copy when the
+                  download ships one.
+                </p>
+              </div>
+
+              <div className={styles.field}>
+                <label className={`${styles.label} flex items-center cursor-pointer select-none`}>
+                  <input
+                    type="checkbox"
+                    checked={autoLaunchInstaller}
+                    onChange={(e) => setAutoLaunchInstaller(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-emerald-600 focus:ring-emerald-500 mr-2.5"
+                  />
+                  <span className="text-slate-100 font-medium flex items-center gap-2">
+                    <Rocket className="w-3.5 h-3.5" />
+                    Launch the game installer
+                  </span>
+                </label>
+              </div>
+
+              <div className={styles.field}>
+                <label className={`${styles.label} flex items-center cursor-pointer select-none`}>
+                  <input
+                    type="checkbox"
+                    checked={autoDeleteAfterInstall}
+                    onChange={(e) => setAutoDeleteAfterInstall(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-emerald-600 focus:ring-emerald-500 mr-2.5"
+                  />
+                  <span className="text-slate-100 font-medium flex items-center gap-2">
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Delete downloaded files after installation
+                  </span>
+                </label>
+                <p className={styles.proxyNote}>
+                  Removes the archive and the extracted files once the installer exits. If the
+                  installer is still running, the files are kept. The installed game is never deleted.
+                </p>
+              </div>
+            </>
           )}
         </div>
 

@@ -21,6 +21,23 @@ npm start
 
 Or set `ADMIN_TOKEN` and `PORT` (default 4480) via environment variables.
 
+## AI install proxy
+
+Render can run this service as the shared NVIDIA NIM proxy for Universal
+Freebie. Set `NVIDIA_NIM_API_KEY` as a Render secret and optionally set
+`AI_CLIENT_TOKEN` to require an app token. The app calls:
+
+```
+POST /api/ai/install-plan
+```
+
+The request contains only the game title, source, and a bounded local file
+listing. The NVIDIA key is never sent to or stored in the Electron client.
+The endpoint is rate-limited to 30 requests per IP per hour. `render.yaml`
+contains the free service definition. The Electron client defaults to the
+matching `https://universal-freebie-ai.onrender.com/api/ai/install-plan` URL;
+set `UNIVERSAL_FREEBIE_AI_URL` only if Render assigns a different service URL.
+
 Open **http://localhost:4480** in a browser, enter the admin token, and you'll
 see a list of devices with their snapshots.
 

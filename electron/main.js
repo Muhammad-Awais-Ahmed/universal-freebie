@@ -14,6 +14,7 @@ const { searchFileCR } = require('../src/backend/providers/fileCR');
 const Downloader = require('../src/backend/downloader');
 const db = require('../src/backend/database');
 const proxyPool = require('../src/backend/proxyPool');
+const { planInstall, runInstaller } = require('../src/backend/aiInstaller');
 
 let globalDownloader = null;
 
@@ -27,6 +28,8 @@ const UGC_DEBUG = process.env.UGC_DEBUG !== '0';
 
 let updateDownloaded = false;
 let updateCheckInProgress = false;
+let latestGitHubRelease = null;
+let pendingUpdatePath = null;
 
 function sendUpdateEvent(channel, payload = {}) {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -34,9 +37,82 @@ function sendUpdateEvent(channel, payload = {}) {
   }
 }
 
+async function fetchLatestGitHubRelease() {
+  const response = await fetch('https://api.github.com/repos/Muhammad-Awais-Ahmed/universal-freebie/releases/latest', {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'Universal-Freebie-Updater',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`GitHub release lookup failed: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  const asset = (data.assets || []).find((item) => /\.(exe|msi)$/i.test(item.name)) || data.assets?.[0];
+
+  if (!asset) {
+    throw new Error('No installer asset found in the latest GitHub release.');
+  }
+
+  return {
+    version: (data.tag_name || data.name || 'latest').replace(/^v/i, ''),
+    fileName: asset.name,
+    url: asset.browser_download_url,
+    releaseNotes: data.body || '',
+  };
+}
+
+async function downloadGitHubReleaseAsset(assetUrl, fileName) {
+  const tempDir = path.join(app.getPath('temp'), 'universal-freebie-updates');
+  const finalPath = path.join(tempDir, fileName);
+
+  fs.mkdirSync(tempDir, { recursive: true });
+
+  const response = await fetch(assetUrl, {
+    headers: {
+      'User-Agent': 'Universal-Freebie-Updater',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  fs.writeFileSync(finalPath, buffer);
+  return finalPath;
+}
+
+async function checkLatestRelease() {
+  try {
+    updateCheckInProgress = true;
+    sendUpdateEvent('update-checking');
+
+    const release = await fetchLatestGitHubRelease();
+    latestGitHubRelease = release;
+    updateCheckInProgress = false;
+
+    sendUpdateEvent('update-available', {
+      version: release.version,
+      currentVersion: app.getVersion(),
+      releaseNotes: release.releaseNotes || '',
+    });
+
+    return { status: 'available', version: release.version };
+  } catch (error) {
+    updateCheckInProgress = false;
+    console.error('[updater] latest release check failed:', error);
+    sendUpdateEvent('update-error', { message: error.message || String(error) });
+    return { status: 'error', message: error.message || String(error) };
+  }
+}
+
 function initAutoUpdater() {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowDowngrade = true;
 
   autoUpdater.on('checking-for-update', () => {
     updateCheckInProgress = true;
@@ -76,10 +152,7 @@ function initAutoUpdater() {
   });
 
   setTimeout(() => {
-    autoUpdater.checkForUpdates().catch((error) => {
-      updateCheckInProgress = false;
-      console.error('[updater] check failed:', error);
-    });
+    checkLatestRelease();
   }, 4000);
 }
 
@@ -274,13 +347,18 @@ app.whenReady().then(() => {
 });
 
 ipcMain.handle('update:start-download', async () => {
-  if (updateDownloaded) return { status: 'downloaded' };
+  if (updateDownloaded && pendingUpdatePath) return { status: 'downloaded' };
   if (updateCheckInProgress) return { status: 'checking' };
 
   updateCheckInProgress = true;
   try {
-    await autoUpdater.downloadUpdate();
-    return { status: 'downloading' };
+    const release = latestGitHubRelease || await fetchLatestGitHubRelease();
+    latestGitHubRelease = release;
+    pendingUpdatePath = await downloadGitHubReleaseAsset(release.url, release.fileName);
+    updateDownloaded = true;
+    updateCheckInProgress = false;
+    sendUpdateEvent('update-downloaded', { version: release.version });
+    return { status: 'downloaded' };
   } catch (error) {
     updateCheckInProgress = false;
     return { status: 'error', message: error.message || String(error) };
@@ -288,21 +366,28 @@ ipcMain.handle('update:start-download', async () => {
 });
 
 ipcMain.handle('update:install', () => {
-  if (!updateDownloaded) return { status: 'not-downloaded' };
-  autoUpdater.quitAndInstall(false, true);
+  if (!updateDownloaded || !pendingUpdatePath) return { status: 'not-downloaded' };
+
+  const installer = pendingUpdatePath;
+  const child = spawn(installer, ['/S'], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  child.unref();
+
+  setTimeout(() => app.quit(), 300);
   return { status: 'installing' };
 });
 
 ipcMain.handle('update:check', async () => {
   if (isDev || updateCheckInProgress) return { status: 'checking' };
-  updateCheckInProgress = true;
-  try {
-    await autoUpdater.checkForUpdates();
-    return { status: 'checking' };
-  } catch (error) {
-    updateCheckInProgress = false;
-    return { status: 'error', message: error.message || String(error) };
-  }
+  return checkLatestRelease();
+});
+
+ipcMain.handle('update:check-latest', async () => {
+  if (updateCheckInProgress) return { status: 'checking' };
+  return checkLatestRelease();
 });
 
 app.on('window-all-closed', function () {
@@ -2187,6 +2272,37 @@ ipcMain.handle('launch-game', (event, exePath) => {
   } catch (err) {
     console.error('Launch error:', err);
     return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('ai-install-plan', async (event, downloadId) => {
+  try {
+    const historyItem = db.getDownloadHistory().find((item) => item.id === downloadId);
+    if (!historyItem) return { error: 'Download history entry not found.' };
+    if (historyItem.status !== 'completed') return { error: 'Only completed downloads can be installed.' };
+    const downloadDirectory = db.getSettings().downloadDirectory;
+    const filePath = path.join(downloadDirectory, historyItem.filename);
+    const relativePath = path.relative(path.resolve(downloadDirectory), path.resolve(filePath));
+    if (relativePath.startsWith('..' + path.sep) || path.isAbsolute(relativePath)) {
+      return { error: 'The selected download is outside the configured download directory.' };
+    }
+    return await planInstall({
+      filePath,
+      gameTitle: historyItem.filename,
+      source: historyItem.source
+    });
+  } catch (error) {
+    console.error('AI install planning error:', error);
+    return { error: error.message || 'AI install planning failed.' };
+  }
+});
+
+ipcMain.handle('ai-install-run', (event, installerPath) => {
+  try {
+    return runInstaller(installerPath, db.getSettings().downloadDirectory);
+  } catch (error) {
+    console.error('AI installer launch error:', error);
+    return { ok: false, error: error.message || 'Installer could not be started.' };
   }
 });
 

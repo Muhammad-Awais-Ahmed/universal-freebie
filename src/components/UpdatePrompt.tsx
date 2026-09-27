@@ -63,6 +63,13 @@ export default function UpdatePrompt() {
     window.require("electron").ipcRenderer.invoke("update:install");
   };
 
+  const checkForUpdates = async () => {
+    setError("");
+    setState("available");
+    const { ipcRenderer } = window.require("electron");
+    await ipcRenderer.invoke("update:check-latest");
+  };
+
   return (
     <div className="update-overlay" role="dialog" aria-modal="true" aria-labelledby="update-title">
       <div className="update-card">
@@ -89,6 +96,9 @@ export default function UpdatePrompt() {
             <button className="update-button update-button-muted" disabled>Downloading...</button>
           ) : (
             <button className="update-button update-button-primary" onClick={startDownload}>Download update</button>
+          )}
+          {state !== "downloading" && (
+            <button className="update-button update-button-muted" onClick={checkForUpdates}>Check for updates</button>
           )}
           {state !== "downloading" && <button className="update-button update-button-muted" onClick={() => setState(null)}>Later</button>}
         </div>

@@ -61,6 +61,7 @@
     ],
     "win": {
       "target": "nsis",
+      "artifactName": "Universal-Freebie-Setup-${version}.${ext}",
       "signAndEditExecutable": true,
       "signtoolOptions": {
         "signingHashAlgorithms": ["sha256"],

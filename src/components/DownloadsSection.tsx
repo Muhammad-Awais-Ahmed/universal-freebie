@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import styles from "./DownloadsSection.module.css";
 import { formatNumericBytes } from "@/utils/formatters";
-import { DownloadCloud, Play, Square, FolderOpen, X, Loader2, HardDrive } from "lucide-react";
+import { DownloadCloud, Play, Square, FolderOpen, X, Loader2, HardDrive, Sparkles } from "lucide-react";
 
 interface HistoryItem {
   id: string;
@@ -55,6 +55,7 @@ export default function DownloadsSection() {
   const [dir, setDir] = useState("");
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [aiInstallId, setAiInstallId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
 
   const invoke = useCallback((channel: string, ...args: unknown[]) => {
@@ -117,6 +118,32 @@ export default function DownloadsSection() {
   const removeDownload = async (id: string) => {
     await invoke("remove-download", id);
     await refresh();
+  };
+
+  const installWithAi = async (item: HistoryItem) => {
+    setAiInstallId(item.id);
+    setNotice("");
+    try {
+      const plan = await invoke("ai-install-plan", item.id);
+      if (!plan || plan.error) {
+        setNotice(plan?.error || "AI could not prepare an install plan.");
+        return;
+      }
+
+      const confidence = Math.round((plan.confidence || 0) * 100);
+      const approved = window.confirm(
+        `AI found this installer:\n\n${plan.displayPath}\n\n${plan.reason}\nConfidence: ${confidence}%\n\nRun the installer now?`
+      );
+      if (!approved) return;
+
+      const result = await invoke("ai-install-run", plan.installerPath);
+      setNotice(result?.ok ? "Installer started. Complete the setup window to finish." : result?.error || "Installer could not be started.");
+    } catch (err) {
+      console.error("AI install failed:", err);
+      setNotice("AI install failed. Check the NVIDIA NIM key and try again.");
+    } finally {
+      setAiInstallId(null);
+    }
   };
 
   const openFile = (filename: string) => {
@@ -269,12 +296,26 @@ export default function DownloadsSection() {
                       </button>
                     )}
                     {item.status === "completed" && (
-                      <button
-                        className={styles.actionBtn}
-                        onClick={() => openFile(item.filename)}
-                      >
-                        <FolderOpen className="w-3 h-3 text-cyan-400" /> Open Folder
-                      </button>
+                      <>
+                        <button
+                          className={styles.actionBtn}
+                          disabled={aiInstallId === item.id}
+                          onClick={() => installWithAi(item)}
+                        >
+                          {aiInstallId === item.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Sparkles className="w-3 h-3 text-amber-300" />
+                          )}
+                          {aiInstallId === item.id ? "Planning…" : "AI Install"}
+                        </button>
+                        <button
+                          className={styles.actionBtn}
+                          onClick={() => openFile(item.filename)}
+                        >
+                          <FolderOpen className="w-3 h-3 text-cyan-400" /> Open Folder
+                        </button>
+                      </>
                     )}
                     <button
                       className={styles.removeBtn}

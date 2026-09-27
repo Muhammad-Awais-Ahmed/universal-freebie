@@ -1,0 +1,16 @@
+{
+  "name": "universal-freebie-ai-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Server-side NVIDIA NIM proxy for Universal Freebie AI installer detection",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

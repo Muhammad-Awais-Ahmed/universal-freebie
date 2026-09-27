@@ -3,15 +3,18 @@ services:
     name: universal-freebie-ai
     runtime: node
     plan: free
-    rootDir: monitor-admin
+    rootDir: ai-backend
     buildCommand: npm install
     startCommand: npm start
+    healthCheckPath: /api/health
     envVars:
       - key: NVIDIA_NIM_API_KEY
         sync: false
       - key: NVIDIA_NIM_MODEL
         value: meta/llama-3.1-8b-instruct
-      - key: ADMIN_TOKEN
-        sync: false
       - key: AI_CLIENT_TOKEN
         sync: false
+      - key: AI_REQUEST_LIMIT
+        value: 30
+      - key: AI_REQUEST_WINDOW_MS
+        value: 3600000

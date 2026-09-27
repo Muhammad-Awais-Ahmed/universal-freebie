@@ -77,6 +77,19 @@ function parseJson(content) {
   return JSON.parse(cleaned);
 }
 
+function extractPlan(payload) {
+  // The AI backend returns the normalized shape; direct NIM calls return
+  // the raw OpenAI-compatible one. Support both.
+  if (payload && typeof payload.installerPath !== 'undefined' && !payload.choices) {
+    return {
+      installerPath: payload.installerPath,
+      confidence: payload.confidence,
+      reason: payload.reason,
+    };
+  }
+  return parseJson(payload && payload.choices && payload.choices[0] && payload.choices[0].message.content);
+}
+
 async function planInstall({ filePath, gameTitle, source }) {
   const apiKey = getApiKey();
   if (!AI_PROXY_URL && !apiKey) {
@@ -141,7 +154,7 @@ async function planInstall({ filePath, gameTitle, source }) {
     throw new Error(`NVIDIA NIM request failed (${response.status}): ${detail.slice(0, 240)}`);
   }
   const payload = await response.json();
-  const result = parseJson(payload.choices?.[0]?.message?.content);
+  const result = extractPlan(payload);
   const installerPath = typeof result.installerPath === 'string' ? result.installerPath : '';
   const installer = installerPath ? resolveInside(scanRoot, installerPath) : null;
   if (!installer || !fs.existsSync(installer) || !['.exe', '.msi'].includes(path.extname(installer).toLowerCase())) {

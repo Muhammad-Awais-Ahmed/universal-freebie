@@ -1142,7 +1142,11 @@ class Downloader {
       item.status = 'downloading';
       item.speed = 0;
       item.error = undefined;
-      db.updateDownloadHistory(id, { status: 'downloading' });
+      db.updateDownloadHistory(item.id, {
+        status: 'downloading',
+        downloadedBytes: item.downloadedBytes || 0,
+        totalBytes: item.totalBytes || 0
+      });
       this._emitProgress();
       this.startYtDlpDownload(item.url, item.filename, item.meta, item.id);
       return;
@@ -1153,7 +1157,11 @@ class Downloader {
       item.status = 'downloading';
       item.speed = 0;
       item.error = undefined;
-      db.updateDownloadHistory(id, { status: 'downloading' });
+      db.updateDownloadHistory(item.id, {
+        status: 'downloading',
+        downloadedBytes: item.downloadedBytes || 0,
+        totalBytes: item.totalBytes || 0
+      });
       this._emitProgress();
 
       // A paused Electron download is still owned by its DownloadItem and has
@@ -1178,7 +1186,11 @@ class Downloader {
 
     if (item.status === 'queued') {
       item.status = 'downloading';
-      db.updateDownloadHistory(id, { status: 'downloading' });
+      db.updateDownloadHistory(item.id, {
+        status: 'downloading',
+        downloadedBytes: item.downloadedBytes || 0,
+        totalBytes: item.totalBytes || 0
+      });
       this._emitProgress();
       this._performHttpDownload(item.id, item._resumeUrl || item.url, item.filePath, item._resumeFrom || 0);
     }
@@ -1227,7 +1239,11 @@ class Downloader {
       type: history.type || 'http'
     };
     this.downloads.set(id, item);
-    db.updateDownloadHistory(id, { status: 'downloading' });
+    db.updateDownloadHistory(item.id, {
+      status: 'downloading',
+      downloadedBytes: item.downloadedBytes || 0,
+      totalBytes: item.totalBytes || 0
+    });
     this._emitProgress();
     this._performHttpDownload(id, item.url, filePath, resumeFrom);
     return { success: true };

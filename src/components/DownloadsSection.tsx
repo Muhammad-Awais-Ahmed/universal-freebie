@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import styles from "./DownloadsSection.module.css";
 import { formatNumericBytes } from "@/utils/formatters";
-import { DownloadCloud, Play, Square, FolderOpen, X, Loader2, HardDrive, Sparkles } from "lucide-react";
+import { DownloadCloud, Play, Square, FolderOpen, X, Loader2, HardDrive, Sparkles, Gamepad2 } from "lucide-react";
 
 interface HistoryItem {
   id: string;
@@ -39,6 +39,7 @@ function getStatusText(item: HistoryItem): string {
     case "queued":
       return "Queued";
     case "interrupted":
+      return "Paused";
     case "error":
       return "Paused / Incomplete";
     case "completed":
@@ -172,6 +173,26 @@ export default function DownloadsSection() {
 
   const isActive = (item: HistoryItem) =>
     ["downloading", "queued"].includes(item.status);
+
+  // Registers a finished download in the library by locating the real game
+  // executable inside it, so the entry is launchable from the Library page.
+  const addToLibrary = async (item: HistoryItem) => {
+    setAiInstallId(item.id);
+    setNotice("");
+    try {
+      const res = await invoke("add-download-to-library", item.id);
+      if (res && res.ok) {
+        setNotice(`Added "${res.game?.name || "game"}" to your library.`);
+      } else {
+        setNotice(res?.error || "No game executable was found in this download.");
+      }
+    } catch (err) {
+      console.error("Add to library failed:", err);
+      setNotice("Could not add this download to your library.");
+    } finally {
+      setAiInstallId(null);
+    }
+  };
 
   return (
     <section className={styles.section} id="downloads">
@@ -308,6 +329,15 @@ export default function DownloadsSection() {
                             <Sparkles className="w-3 h-3 text-amber-300" />
                           )}
                           {aiInstallId === item.id ? "Planning…" : "AI Install"}
+                        </button>
+                        <button
+                          className={styles.actionBtn}
+                          disabled={aiInstallId === item.id}
+                          title="Find the game executable and add it to your library"
+                          onClick={() => addToLibrary(item)}
+                        >
+                          <Gamepad2 className="w-3 h-3 text-emerald-300" />
+                          Add to Library
                         </button>
                         <button
                           className={styles.actionBtn}

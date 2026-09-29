@@ -1148,13 +1148,30 @@ class Downloader {
       return;
     }
 
-    if (item.status === 'error' || item.status === 'cancelled') {
+    if (item.status === 'error' || item.status === 'cancelled' || item.status === 'interrupted') {
       const resumeFrom = item.downloadedBytes || 0;
       item.status = 'downloading';
       item.speed = 0;
       item.error = undefined;
       db.updateDownloadHistory(id, { status: 'downloading' });
       this._emitProgress();
+
+      // A paused Electron download is still owned by its DownloadItem and has
+      // a live socket, so un-pausing it continues the very same transfer
+      // (including the partially written file). Re-issuing a plain HTTP
+      // request instead would start a second, competing transfer for the same
+      // path and corrupt the partial file.
+      if (item.type === 'electron' && item.electronItem) {
+        try {
+          item.electronItem.resume();
+        } catch (e) {
+          // Nothing to un-pause: fall through to a fresh HTTP attempt so the
+          // row is not left stuck in 'downloading' with nothing happening.
+          this._performHttpDownload(item.id, item.url, item.filePath, resumeFrom);
+        }
+        return;
+      }
+
       this._performHttpDownload(item.id, item.url, item.filePath, resumeFrom);
       return;
     }
@@ -1284,6 +1301,16 @@ class Downloader {
     setTimeout(() => {
       const item = this.downloads.get(id);
       if (item && (item.status === 'completed' || item.status === 'cancelled')) {
+        // A finished download is only dropped once the auto-installer is no
+        // longer working on it. Evicting on a bare 30s timer raced the UI:
+        // the "Install" button was still on screen (the renderer keeps its own
+        // copy of the row) but the backing item was already gone, so clicking
+        // it failed with "That download is no longer in the list." The item is
+        // also what `add-download-to-library` resolves a path from, so losing
+        // it silently made the game un-addable. Now the row is released only
+        // after the pipeline reports a terminal phase, and only if the user
+        // never asked to keep it.
+        if (this._isInstallPending(id)) return;
         if (item.type === 'torrent' && item.torrentInfo) {
           try { item.torrentInfo.destroy(); } catch (e) {}
         }
@@ -1298,6 +1325,17 @@ class Downloader {
         this._emitProgress();
       }
     }, COMPLETED_AUTO_REMOVE_MS);
+  }
+
+  // True while the AI install pipeline is still mid-flight for this download.
+  // Set by main.js so the downloader does not need to know about installers.
+  _isInstallPending(id) {
+    if (typeof this.isInstallPending !== 'function') return false;
+    try {
+      return this.isInstallPending(id) === true;
+    } catch (e) {
+      return false;
+    }
   }
 
   interceptElectronDownload(item) {
@@ -1352,7 +1390,14 @@ class Downloader {
         downloadItem.error = 'Download interrupted';
       } else if (state === 'progressing') {
         if (item.isPaused()) {
-          downloadItem.status = 'paused';
+          // Electron reports a pause as a 'progressing' tick on a paused item.
+          // The old 'paused' status was only ever produced here and was
+          // understood by nothing downstream: neither download UI renders a
+          // control for it, and _emitProgress' monotonic clamp ignores it, so a
+          // paused row showed a frozen bar and no buttons at all. 'interrupted'
+          // is the status the rest of the app already uses for "stopped but
+          // resumable", so pausing now reports that and gets a Resume control.
+          downloadItem.status = 'interrupted';
         } else {
           downloadItem.status = 'downloading';
           downloadItem.downloadedBytes = safeNum(() => item.getReceivedBytes());
@@ -1429,7 +1474,11 @@ class Downloader {
     // item and never let the UI (or persisted history) see a decrease.
     const now = Date.now();
     for (const [, item] of this.downloads) {
-      if (item.status === 'downloading' || item.status === 'queued') {
+      // 'interrupted' is included on purpose: a paused/stalled transfer still
+      // holds a valid byte count and percent, and it must be normalised the
+      // same way as an active one, otherwise the bar freezes on a stale or
+      // un-normalised value while the row sits there waiting to be resumed.
+      if (item.status === 'downloading' || item.status === 'queued' || item.status === 'interrupted') {
         const maxBytes = Math.max(item._maxDownloadedBytes || 0, item.downloadedBytes || 0);
         item._maxDownloadedBytes = maxBytes;
         // Never show more downloaded than total (totalBytes can shrink
@@ -1452,14 +1501,25 @@ class Downloader {
         // otherwise produce a negative "speed" that makes the meter
         // look like it's going backwards).
         if (typeof item.speed === 'number' && item.speed < 0) item.speed = 0;
+
+        // A stalled transfer reports no throughput. Leaving the last sampled
+        // value on screen would keep claiming the file is still moving, so it
+        // is zeroed as soon as the row stops being active.
+        if (item.status !== 'downloading' && item.status !== 'queued') {
+          item.speed = 0;
+        }
       }
 
       // Throttled persistence of partial progress so a half-downloaded file
       // can be resumed after an app restart (writes at most every 5s per item).
-      if (item.status === 'downloading' && (item._lastHistSave || 0) + 5000 < now) {
+      // Interrupted rows are persisted on the same schedule, otherwise a
+      // paused download is still written to history as 'downloading' and the
+      // row comes back looking active (with no Resume control) after a reload.
+      if ((item.status === 'downloading' || item.status === 'interrupted')
+        && (item._lastHistSave || 0) + 5000 < now) {
         item._lastHistSave = now;
         db.updateDownloadHistory(item.id, {
-          status: 'downloading',
+          status: item.status,
           downloadedBytes: item.downloadedBytes || 0,
           totalBytes: item.totalBytes || 0
         });

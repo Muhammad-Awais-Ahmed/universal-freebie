@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import styles from "./DownloadManager.module.css";
 import { formatNumericBytes } from "@/utils/formatters";
-import { DownloadCloud, ChevronDown, ChevronUp, Square, RotateCcw, X, FolderOpen, Bot, Play, Trash2 } from "lucide-react";
+import { DownloadCloud, ChevronDown, ChevronUp, Square, RotateCcw, X, FolderOpen, Bot, Play, Trash2, Gamepad2, Check } from "lucide-react";
 
 interface DownloadItem {
   id: string;
@@ -64,6 +64,13 @@ const PHASE_LABELS: Record<string, string> = {
   error: "Auto-install failed"
 };
 
+// Phases after which the game is on disk and can be registered in the library.
+const LIBRARY_READY_PHASES = new Set([
+  "installed",
+  "cleaned",
+  "awaiting-manual-install"
+]);
+
 function formatBytes(bytes: number, decimals = 2): string {
   return formatNumericBytes(bytes, decimals);
 }
@@ -83,6 +90,8 @@ function getStatusText(item: DownloadItem, auto?: AutoInstallState | null): stri
       return "Completed ✓";
     case "cancelled":
       return "Cancelled";
+    case "interrupted":
+      return "Paused";
     case "queued":
       return "Queued";
     default:
@@ -96,6 +105,9 @@ export default function DownloadManager() {
   const isVisibleRef = useRef(false);
   const [completedTimer, setCompletedTimer] = useState<Record<string, number>>({});
   const [autoInstall, setAutoInstall] = useState<Record<string, AutoInstallState>>({});
+  const [installingId, setInstallingId] = useState<string | null>(null);
+  const [libraryId, setLibraryId] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     isVisibleRef.current = isVisible;
@@ -123,33 +135,20 @@ export default function DownloadManager() {
     };
   }, []);
 
-  // Auto-dismiss completed items after 5s, but never while the AI installer
-  // is still working on that download.
-  useEffect(() => {
-    const completed = downloads.filter(
-      (d) => d.status === "completed" && !isActiveInstall(autoInstall[d.id])
-    );
-    if (completed.length === 0) return;
-
-    const interval = setInterval(() => {
-      setCompletedTimer((prev) => {
-        const now = Date.now();
-        const updated = { ...prev };
-        let changed = false;
-        for (const item of completed) {
-          if (!updated[item.id]) {
-            updated[item.id] = now;
-            changed = true;
-          } else if (now - updated[item.id] > 5000) {
-            delete updated[item.id];
-            changed = true;
-          }
-        }
-        return changed ? updated : prev;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [downloads, autoInstall]);
+  // A finished download is NOT dismissed on a timer any more. It used to
+  // vanish 5s after completing, which meant the Install button was on screen
+  // for a few seconds at most and was effectively impossible to click (and
+  // the backend evicted the item from its map ~30s later anyway, so there was
+  // nothing to install even if you did). Completed rows now stay until the
+  // user acts on them: install, add to library, or explicitly dismiss.
+  const dismissItem = useCallback((id: string) => {
+    setCompletedTimer((prev) => {
+      if (!prev[id]) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }, []);
 
   const invoke = (channel: string, ...args: unknown[]) => {
     if (window.require) {
@@ -161,6 +160,48 @@ export default function DownloadManager() {
   const filtered = downloads.filter(
     (d) => d.status !== "cancelled" && !completedTimer[d.id]
   );
+
+  // Runs the AI install pipeline for a finished download and then registers the
+  // installed game in the library. The pipeline emits its own progress events,
+  // so this only has to kick it off and surface the outcome.
+  const installAndRegister = useCallback(async (id: string) => {
+    setInstallingId(id);
+    setNotice("");
+    try {
+      const res = await invoke("run-auto-install", id);
+      if (res && res.ok === false) {
+        setNotice(res.error || "Installation could not start.");
+      } else {
+        setNotice("Installer started. The game is added to your library once it finishes.");
+      }
+    } catch (err) {
+      console.error("Install failed:", err);
+      setNotice("Installation could not start.");
+    } finally {
+      setInstallingId(null);
+    }
+  }, [invoke]);
+
+  // Registers an already-installed download in the library without re-running
+  // the installer. `detect-installed-game` finds the real game executable, so
+  // the entry that lands in the library is launchable rather than the archive.
+  const addToLibrary = useCallback(async (id: string) => {
+    setLibraryId(id);
+    setNotice("");
+    try {
+      const res = await invoke("add-download-to-library", id);
+      if (res && res.ok) {
+        setNotice(`Added "${res.game?.name || "game"}" to your library.`);
+      } else {
+        setNotice(res?.error || "No game executable was found in this download.");
+      }
+    } catch (err) {
+      console.error("Add to library failed:", err);
+      setNotice("Could not add this download to your library.");
+    } finally {
+      setLibraryId(null);
+    }
+  }, [invoke]);
 
   const activeCount = filtered.filter(
     (d) => d.status === "downloading" || d.status === "queued"
@@ -187,6 +228,7 @@ export default function DownloadManager() {
 
       {isVisible && (
         <div className={styles.list}>
+          {notice && <div className={styles.notice}>{notice}</div>}
           {filtered.length === 0 ? (
             <div className={styles.empty}>No active downloads in queue</div>
           ) : (
@@ -269,24 +311,71 @@ export default function DownloadManager() {
                         <RotateCcw className="w-3 h-3" /> Retry
                       </button>
                     )}
+                    {/* A paused/stalled transfer was previously rendered as a
+                        dead row: the backend used to emit a 'paused' status
+                        that no condition matched, so a stopped download showed
+                        neither Stop nor Retry. Interrupted now maps to Retry,
+                        matching the status the rest of the app uses. */}
+                    {item.status === "interrupted" && (
+                      <button
+                        className={styles.retryBtn}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          invoke("resume-download", item.id);
+                        }}
+                      >
+                        <RotateCcw className="w-3 h-3" /> Resume
+                      </button>
+                    )}
                     {item.status === "completed" && !auto && (
                       <button
                         className={styles.retryBtn}
                         title="Let the AI install this game"
                         onClick={(e) => {
                           e.stopPropagation();
-                          invoke("run-auto-install", item.id);
+                          installAndRegister(item.id);
                         }}
                       >
-                        <Play className="w-3 h-3" /> Install
+                        {installingId === item.id ? (
+                          <RotateCcw className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Play className="w-3 h-3" />
+                        )}{" "}
+                        Install
                       </button>
                     )}
-                    {(item.status === "error" || item.status === "completed") && (
+                    {/* Offered once the pipeline reports the game is on disk.
+                        Kept visible even after the run so a manual retry is
+                        always one click away. */}
+                    {item.status === "completed" && auto && LIBRARY_READY_PHASES.has(auto.phase) && (
+                      <button
+                        className={styles.retryBtn}
+                        title="Find the game executable and add it to your library"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          addToLibrary(item.id);
+                        }}
+                      >
+                        {libraryId === item.id ? (
+                          <RotateCcw className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Gamepad2 className="w-3 h-3" />
+                        )}{" "}
+                        Add to Library
+                      </button>
+                    )}
+                    {(item.status === "error" || item.status === "completed" || item.status === "interrupted") && (
                       <button
                         className={styles.cancelBtn}
+                        title={
+                          item.status === "completed"
+                            ? "Dismiss from list"
+                            : "Remove from list"
+                        }
                         onClick={(e) => {
                           e.stopPropagation();
                           invoke("remove-download", item.id);
+                          dismissItem(item.id);
                         }}
                       >
                         <X className="w-3 h-3" />

@@ -14,7 +14,7 @@ const { searchFileCR } = require('../src/backend/providers/fileCR');
 const Downloader = require('../src/backend/downloader');
 const db = require('../src/backend/database');
 const proxyPool = require('../src/backend/proxyPool');
-const { planInstall, runInstaller, installMissingDependencies, cleanupDownloadArtifacts, pruneEmptyStaging, STAGING_DIR_NAME } = require('../src/backend/aiInstaller');
+const { planInstall, runInstaller, installMissingDependencies, cleanupDownloadArtifacts, pruneEmptyStaging, findGameExecutable, STAGING_DIR_NAME, INSTALLED_DIR_NAME } = require('../src/backend/aiInstaller');
 const { AutoInstaller } = require('../src/backend/autoInstall');
 
 let globalDownloader = null;
@@ -270,6 +270,22 @@ function createWindow() {
     sendToAllWindows('auto-install-progress', state);
   });
   globalDownloader.onCompleted = (item) => autoInstaller.handleCompleted(item);
+  // An installed game is registered in the library so it can be launched from
+  // there. Best-effort by design: a duplicate or an unreadable path must not
+  // break the install that just succeeded.
+  autoInstaller.onRegisterGame = (game) => {
+    try {
+      const existing = db.getInstalledGames().find(
+        (entry) => entry.executablePath === game.executablePath
+      );
+      if (existing) return existing;
+      db.addInstalledGame(game);
+      return db.getInstalledGames().find((entry) => entry.executablePath === game.executablePath) || null;
+    } catch (err) {
+      console.warn('Could not add installed game to library:', err.message);
+      return null;
+    }
+  };
 
   mainWindow.webContents.session.on('will-download', (event, item, webContents) => {
     if (globalDownloader) {
@@ -2252,6 +2268,81 @@ ipcMain.handle('add-game-entry', (event, gameData) => {
 ipcMain.handle('remove-installed-game', (event, id) => {
   db.removeInstalledGame(id);
   return true;
+});
+
+// Register a finished download in the library without re-running its
+// installer. The game executable is located on disk (never guessed from the
+// filename) so the entry can actually be launched, and an already-registered
+// path is reported as a no-op rather than duplicated.
+ipcMain.handle('add-download-to-library', async (event, downloadId) => {
+  try {
+    const history = db.getDownloadHistory().find((item) => item.id === downloadId);
+    const live = globalDownloader && globalDownloader.downloads.get(downloadId);
+    if (!history && !live) {
+      return { ok: false, error: 'That download is no longer in the list.' };
+    }
+
+    const downloadDirectory = db.getSettings().downloadDirectory;
+    const filename = (live && live.filename) || (history && history.filename);
+    const filePath = (live && live.filePath) || (filename ? path.join(downloadDirectory, filename) : null);
+    if (!filePath) {
+      return { ok: false, error: 'The downloaded file could not be located.' };
+    }
+
+    // An extracted .zip lives in the per-game staging folder; a plain
+    // installer or an already-unpacked folder is searched in place.
+    const gameTitle = path.basename(filename || path.basename(filePath), path.extname(filename || filePath));
+    const stagingCandidate = path.join(downloadDirectory, STAGING_DIR_NAME, gameTitle);
+    const roots = [
+      fs.existsSync(stagingCandidate) ? stagingCandidate : null,
+      filePath
+    ].filter(Boolean);
+
+    let found = null;
+    for (const root of roots) {
+      try {
+        found = findGameExecutable(root);
+      } catch (err) {
+        found = null;
+      }
+      if (found) break;
+    }
+
+    if (!found) {
+      return {
+        ok: false,
+        error: 'No game executable was found in this download. Install it first, then add it from the Library page.'
+      };
+    }
+
+    const existing = db.getInstalledGames().find((entry) => entry.executablePath === found.absolutePath);
+    if (existing) {
+      return { ok: true, game: existing, alreadyAdded: true };
+    }
+
+    const name = gameTitle
+      .replace(/\.[^.]+$/, '')
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, ' ')
+      .replace(/[._]+/g, ' ')
+      .trim()
+      .slice(0, 80)
+      || path.basename(found.absolutePath, path.extname(found.absolutePath));
+
+    db.addInstalledGame({
+      name,
+      executablePath: found.absolutePath,
+      size: String(found.size),
+      source: (history && history.source) || (live && live.meta && live.meta.source) || 'Installed'
+    });
+
+    return {
+      ok: true,
+      game: db.getInstalledGames().find((entry) => entry.executablePath === found.absolutePath)
+    };
+  } catch (err) {
+    console.error('add-download-to-library error:', err);
+    return { ok: false, error: err.message };
+  }
 });
 
 ipcMain.handle('launch-game', (event, exePath) => {

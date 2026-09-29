@@ -176,6 +176,17 @@
   animation: pulse 1.8s infinite;
 }
 
+/* Paused / stalled: keeps the amber tone but stops animating so a stopped
+   transfer is not mistaken for one that is still moving. The class name must
+   stay in sync with `capitalize(item.status)` in the component, which builds
+   `progressBar` + Capitalised(status). */
+.progressBarInterrupted {
+  background: linear-gradient(90deg, #b45309 0%, #f59e0b 100%);
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.45);
+  animation: none;
+  opacity: 0.85;
+}
+
 .progressBarInstalling {
   background: linear-gradient(90deg, #059669 0%, #34d399 100%);
   box-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
@@ -270,6 +281,18 @@
   display: flex;
   gap: 6px;
   align-items: center;
+}
+
+/* Result of an install / add-to-library action. */
+.notice {
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: #bae6fd;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 7px 9px;
+  border-radius: 8px;
+  margin-bottom: 8px;
 }
 
 .cancelBtn {

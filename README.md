@@ -1,26 +1,51 @@
 # Universal Freebie
 
-**Game download manager** built with **Electron + Next.js**.
+Universal Freebie is a Windows desktop app for discovering, downloading, and managing PC games from multiple sources in one place.
 
-Universal Freebie lets you search, download, and manage games from multiple
-sources (ApunKaGames, FileCR, FitGirl, SteamUnlocked, Archive.org) through
-one unified UI.
+It combines a search UI, intelligent download tracking, a game library, and optional AI-assisted installation workflows into a single Electron + Next.js application.
 
 ---
 
-## Features
+## Current features
 
-- **Unified search engine** — searches all enabled sources at once, **scrolls
-  through every result page** so *all* matching items load, then **ranks them
-  by relevance** so the best matches appear first (exact title matches top the
-  list, followed by prefix, phrase, and word-coverage matches, with download
-  popularity and release year as tie-breakers).
-- **Download manager** — HTTP downloads with resume/retry and a download
-  queue; torrent/magnet downloads via WebTorrent (FitGirl).
-- **Library** — tracks downloaded files, installed games, and lets you launch
-  them.
-- **Sources** — Archive.org (multi-file items: ISOs, split archives,
-  installers), FitGirl, SteamUnlocked, ApunKaGames, FileCR.
+- Unified search across supported game sources
+- Relevance-based result ranking with multi-page scraping for broader coverage
+- Download queue and live progress tracking for active and interrupted downloads
+- Resume / retry / continue support for partially downloaded files
+- Download history with per-item status and progress persistence
+- Manual app update checks from Settings (no forced update prompt on startup)
+- Game Library page for installed games, download history, and local storage browsing
+- Add Game flow for manual library registration
+- Optional AI automatic installation pipeline
+  - identifies the real installer in a finished download
+  - installs missing system dependencies when needed
+  - launches the installer
+  - optionally keeps or removes downloaded artifacts after install
+- Add-to-Library action for completed downloads and installed games
+- Download directory selection and app settings management
+
+---
+
+## Removed / no longer active
+
+The app no longer does the following:
+
+- no forced update check at app startup
+- no automatic update install without explicit user action
+- no legacy "always available" updater flow that pops on launch
+- no undocumented or hidden download-only behavior without the library/settings workflow
+
+The update experience is now user-driven and explicit through the Settings page.
+
+---
+
+## Supported sources
+
+- ApunKaGames
+- FileCR
+- FitGirl
+- SteamUnlocked
+- Archive.org
 
 ---
 
@@ -28,10 +53,10 @@ one unified UI.
 
 | Tool | Version | Notes |
 |------|---------|-------|
-| [Node.js](https://nodejs.org) | **20.9+** | Includes `npm` |
-| Windows | 10 / 11 | NSIS installer target |
+| [Node.js](https://nodejs.org) | 20.9+ | Includes npm |
+| Windows | 10 / 11 | Primary target |
 
-Check your versions:
+Check versions:
 
 ```bat
 node -v
@@ -40,127 +65,121 @@ npm -v
 
 ---
 
-## Quick start (one-click build)
+## Quick start
 
-Double-click **`build.bat`** in this folder. It will:
+Double-click `build.bat` in the project root.
 
-1. Verify Node.js / npm are installed
-2. Run `npm install` (syncs or fresh-installs dependencies)
-3. Build the Next.js frontend (`next build` → static export to `out/`)
-4. Package the Windows app with electron-builder
+It will:
 
-**Outputs:**
+1. Verify Node.js and npm are available
+2. Install dependencies
+3. Build the Next.js frontend
+4. Package the Electron app with electron-builder
 
-| Command | Output |
-|---------|--------|
-| `build.bat` | `dist\Universal Freebie Setup 1.0.0.exe` (NSIS installer) |
-| `build.bat dir` | `dist\win-unpacked\Universal Freebie.exe` (no installer) |
+### Build outputs
 
-The installer is in `dist\` when done. Install it, and the app appears in your
-Start Menu / desktop.
+```bat
+build.bat
+```
+
+Creates a Windows installer in `dist/`.
+
+```bat
+build.bat dir
+```
+
+Creates an unpacked app folder in `dist/win-unpacked/`.
 
 ---
 
-## Manual build (step by step)
+## Manual build
 
 ```bat
-REM 1. Install dependencies
 npm install
-
-REM 2. Build the Next.js frontend (static export)
 npm run build
-
-REM 3a. Create the NSIS installer
 npm run package
-
-REM 3b. ...or just an unpacked folder (faster, no installer)
-npm run package:dir
 ```
 
-- `npm run package` → installer at `dist\Universal Freebie Setup 1.0.0.exe`
-- `npm run package:dir` → unpacked app at `dist\win-unpacked\`
+Or an unpacked folder:
+
+```bat
+npm run package:dir
+```
 
 ---
 
 ## Development
 
-Run the frontend + Electron together with hot reload:
+Run the frontend and Electron together:
 
 ```bat
 npm run electron:dev
 ```
 
-Or separately:
+Or run them separately:
 
 ```bat
-npm run dev          REM Next.js dev server on http://localhost:3000
-npm run electron     REM launch Electron (expects the dev server or out/)
+npm run dev
+npm run electron
 ```
 
 ---
 
 ## Project structure
 
-```
-production/
-├── build.bat                  # One-click builder (installer or dir mode)
+```text
+source/
+├── build.bat
 ├── electron/
-│   └── main.js                # Electron main process (downloads, windows, IPC, search ranking)
+│   └── main.js
 ├── src/
-│   ├── app/                   # Next.js routes: /, /games, /library, /settings
+│   ├── app/
 │   ├── backend/
-│   │   ├── downloader.js      # HTTP download engine (resume, retries, queue)
-│   │   ├── database.js        # Local app database (history, library)
-│   │   └── providers/         # Source scrapers (ApunKaGames, Archive.org, ...)
-│   └── components/            # React UI components
+│   │   ├── aiInstaller.js
+│   │   ├── autoInstall.js
+│   │   ├── database.js
+│   │   ├── downloader.js
+│   │   └── providers/
+│   ├── components/
+│   └── utils/
 ├── public/
-│   └── favicon.ico
-├── package.json               # Scripts + electron-builder config
+├── package.json
 ├── next.config.mjs
-└── .gitignore
+├── tsconfig.json
+├── LICENSE
+└── README.md
 ```
 
 ---
 
-## How the search engine works
+## How the app works
 
-1. You type a query and pick sources → the backend provider for each source
-   starts scraping.
-2. **Every result page is loaded** — Archive.org is queried with a
-   word-matching title query (`title:(word1 AND word2)`) and pages through up
-   to 8 pages of 50 results; FitGirl and SteamUnlocked walk their `page/2/…`
-   search URLs until a page returns nothing new. This loads *all* matches, not
-   just the first page.
-3. Results from all sources are merged and deduplicated (`source::id`).
-4. Each result is **scored for relevance** against the query — exact title
-   match (100) > title starts with query (96) > full phrase in title (92) >
-   word-coverage ratio with an early-word bonus, plus small boosts for
-   description phrase matches, download popularity, and recent release year.
-5. The ranked list is returned and shown with the most relevant results first.
+### Search and ranking
 
----
+- Each configured source is queried for results.
+- Pages are traversed until no fresh items are found, so the app loads more of the catalog instead of stopping at page one.
+- Results are merged, deduplicated, and ranked by relevance using title matching and metadata signals.
 
-## How downloading works
+### Download flow
 
-1. You search a game in the UI → backend provider scrapes the source.
-2. Download links are resolved through the provider:
-   - **Archive.org** items can contain *multiple* payload files (multi-disc
-     ISOs, split archives `.7z.001`/`partN.rar`, bin/cue, installers) — all
-     of them are queued and downloaded with part/total metadata.
-   - **ApunKaGames** → TheFilesLocker chain may open a hidden window for the
-     free-download flow — **some hosts show a captcha that must be solved
-     manually per part**.
-   - **FitGirl** → magnet link, downloaded via WebTorrent.
-3. Files download to your **Downloads** folder (configurable in Settings) with
-   resume/retry support.
+- Downloads are stored under the configured Downloads directory.
+- Active transfers report real-time progress.
+- Interrupted downloads can be resumed instead of restarting from zero.
+- Completed downloads can be installed manually or via the AI installer workflow.
 
-> ⚠️ **Note:** The free-host download flow (e.g. TheFilesLocker) may require you
-> to solve a reCAPTCHA in the pop-up window. Parts download sequentially.
+### Library flow
+
+- Installed games are tracked in the Library page.
+- Download history stays visible for resumed or reinstalled items.
+- A completed download can be registered as a playable game if the executable is found in the downloaded content.
+
+### Update flow
+
+- The app checks for updates only when the user requests it in Settings.
+- This prevents startup noise and keeps update behavior explicit and predictable.
 
 ---
 
 ## License
 
-See [LICENSE](LICENSE) — personal, non-commercial use. Respect the terms of
-service of the sites you download from, and only download content you have
-the right to.
+See [LICENSE](LICENSE). This project is for personal use and respects the terms of service of the sources it accesses. Only download content you are allowed to use.

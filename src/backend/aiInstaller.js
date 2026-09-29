@@ -608,8 +608,161 @@ function pruneEmptyStaging(downloadDirectory) {
   } catch (e) {}
 }
 
+// ---------------------------------------------------------------------------
+// Installed-game detection
+//
+// Once a game is installed we need the executable the player actually starts,
+// so the library can launch it. It is found deterministically rather than by
+// asking the model: a "launcher" is conventionally the largest .exe sitting
+// next to the game's data folders, and the names below are the ones that are
+// never the game itself.
+// ---------------------------------------------------------------------------
+
+// Never a launch target: setup/bootstrap, redistributables, editors, tools.
+const NON_GAME_EXECUTABLES = [
+  /^unins\d*\.exe$/i,
+  /^uninstall/i,
+  /^setup\.exe$/i,
+  /^install/i,
+  /^bootstrap/i,
+  /^autorun/i,
+  /^redist/i,
+  /^vcredist/i,
+  /^dxsetup/i,
+  /^directx/i,
+  /^dotnetfx/i,
+  /^dotnet.*\.exe$/i,
+  /^ngdp/i,
+  /^gfwlive/i,
+  /^crashpad/i,
+  /^crashreport/i,
+  /^unarc/i,
+  /^7z/i,
+  /^winRAR/i,
+  /^arc/i,
+  /^(steam|origin|uplay|epic|eos|ubisoft|rockstar|battle|riot|epicgames|galaxy|ubisoftconnect|launcher\.exe)$/i,
+  /^easyanticheat/i,
+  /^steamstub/i,
+  /^prereq/i,
+  /^_commonredist/i,
+  /^_smartcam/i,
+  /^config(urator)?\.exe$/i,
+  /^editor\.exe$/i,
+  /^sdk.*\.exe$/i
+];
+
+// Strong signal that a file really is the game, not a support tool.
+const GAME_EXE_PATTERNS = [
+  /\.exe$/i
+];
+
+function isLikelyGameExecutable(name) {
+  const base = path.basename(String(name || ''));
+  if (!base || base.length < 4) return false;
+  if (NON_GAME_EXECUTABLES.some((pattern) => pattern.test(base))) return false;
+  return GAME_EXE_PATTERNS.some((pattern) => pattern.test(base));
+}
+
+// Scores one candidate: bigger and shallower files win, because a real game
+// binary is normally the largest .exe in its folder and sits near the top.
+function scoreExecutable(absolutePath, root) {
+  let size = 0;
+  try {
+    size = fs.statSync(absolutePath).size;
+  } catch (e) {
+    return null;
+  }
+  if (size <= 0) return null;
+
+  const relative = path.relative(root, absolutePath);
+  const depth = relative.split(path.sep).length - 1;
+  // A folder whose name looks like the game's data directory is a good hint
+  // that this is the shipped binary (Binaries\Win64\Game.exe and friends).
+  const folderHint = /(^|\\)(bin|binaries|game|release|dist|build|win32|win64|x64)(s)?$/i.test(
+    path.dirname(relative)
+  );
+
+  return { absolutePath, size, depth, score: size / (1 + depth) * (folderHint ? 2 : 1) };
+}
+
+/**
+ * Finds the most plausible game executable inside a download or an
+ * already-installed folder.
+ *
+ * `installerPath` (when supplied) is only used to skip setup/bootstrap files
+ * that are known not to be the game. Returns null when nothing looks like a
+ * runnable game, so callers never register a junk entry in the library.
+ */
+function findGameExecutable(root, options = {}) {
+  const start = root;
+  if (!start || !fs.existsSync(start)) return null;
+
+  // A .zip/.rar that was never extracted cannot be searched, and the caller
+  // only reaches here once an install has already expanded it.
+  let roots = [start];
+  try {
+    if (!fs.statSync(start).isDirectory()) return null;
+  } catch (e) {
+    return null;
+  }
+
+  // A freshly installed game usually lives in one clearly-named subfolder.
+  // Prefer it when it exists, but still fall back to the whole tree.
+  const preferred = [];
+  try {
+    for (const entry of fs.readdirSync(start, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name === STAGING_DIR_NAME) continue;
+      if (/^(bin|bins|binaries|game|games|redist|directx|support|installer)/i.test(entry.name)) continue;
+      preferred.push(path.join(start, entry.name));
+    }
+  } catch (e) {
+    // Unreadable root: fall through with the root only.
+  }
+
+  const candidates = [];
+  const seen = new Set();
+  const visit = (directory, depth) => {
+    if (depth > 5 || candidates.length > 2000) return;
+    let entries = [];
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true });
+    } catch (e) {
+      return;
+    }
+    for (const entry of entries) {
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        // Never descend into these: they hold other products' installers and
+        // would otherwise dominate the search with a large unrelated .exe.
+        if (/^(redist|directx|vcredist|dotnet|node_modules|\.git|uninstall|support|redist_data|__redist)$/i.test(entry.name)) continue;
+        visit(absolute, depth + 1);
+      } else if (/\.exe$/i.test(entry.name)) {
+        if (!isLikelyGameExecutable(entry.name)) continue;
+        if (seen.has(absolute)) continue;
+        seen.add(absolute);
+        const scored = scoreExecutable(absolute, start);
+        if (scored) candidates.push(scored);
+      }
+    }
+  };
+
+  // Search the preferred subfolders first, then the whole tree, so a top-level
+  // launcher always wins over a deeply buried tool of similar size.
+  for (const folder of preferred.slice(0, 8)) {
+    if (fs.existsSync(folder)) visit(folder, 1);
+  }
+  visit(start, 0);
+
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0];
+}
+
 module.exports = {
   planInstall,
+  findGameExecutable,
+  isLikelyGameExecutable,
   runInstaller,
   installMissingDependencies,
   cleanupDownloadArtifacts,

@@ -22,6 +22,9 @@ const {
   installMissingDependencies,
   cleanupDownloadArtifacts,
   pruneEmptyStaging,
+  findGameExecutable,
+  isLikelyGameExecutable,
+  INSTALLED_DIR_NAME,
 } = require('./aiInstaller');
 
 // How long to wait for the game's own installer before giving up and keeping
@@ -44,6 +47,11 @@ class AutoInstaller extends EventEmitter {
     this.getSettings = getSettings;
     this.active = new Map();
     this.state = new Map();
+    // Set by the main process. Receives { name, executablePath, size, source }
+    // once a game is installed on disk, and must return the stored library
+    // entry (or null). Failures are swallowed on purpose: registering the game
+    // is a convenience, never a reason to fail an install.
+    this.onRegisterGame = null;
   }
 
   isEnabled() {
@@ -210,6 +218,15 @@ class AutoInstaller extends EventEmitter {
     if (settings.autoDeleteAfterInstall === true) {
       const finished = await this._waitForInstaller(plan.installerPath, item.id);
       if (finished) {
+        // Register the game BEFORE the staging tree is deleted: for in-place /
+        // "portable" repacks the runnable binary is the thing being removed.
+        const library = this._registerInLibrary({
+          item,
+          plan,
+          stagingDirectory,
+          downloadDirectory,
+        });
+
         const cleanup = cleanupDownloadArtifacts({
           filePath,
           stagingDirectory,
@@ -219,9 +236,12 @@ class AutoInstaller extends EventEmitter {
 
         this._publish(item.id, {
           phase: 'cleaned',
-          message: `Installation finished. Removed ${cleanup.removed.length} downloaded file(s).`,
+          message: library
+            ? `Installation finished. Added "${library.name}" to your library.`
+            : `Installation finished. Removed ${cleanup.removed.length} downloaded file(s).`,
           removed: cleanup.removed,
           cleanupSkipped: cleanup.skipped,
+          library,
         });
         return;
       }
@@ -233,10 +253,59 @@ class AutoInstaller extends EventEmitter {
       return;
     }
 
+    // ---- 5. Register the game in the library ---------------------------
+    // Only safe to scan here: the installer has just been handed the user's
+    // files but may still be writing, and a half-extracted tree would yield a
+    // bogus executable. When the download is kept, the user decides when the
+    // game is ready via the "Add to Library" button.
     this._publish(item.id, {
       phase: 'installed',
       message: 'Installer started. Downloaded files were kept.',
     });
+  }
+
+  /**
+   * Finds the installed game executable and hands it to the library.
+   *
+   * Deliberately synchronous and best-effort: a failure here must never turn a
+   * successful install into an error, it just means the game is not
+   * pre-registered and the user can add it by hand.
+   */
+  _registerInLibrary({ item, plan, stagingDirectory, downloadDirectory }) {
+    if (typeof this.onRegisterGame !== 'function') return null;
+
+    const installerPath = (plan && plan.installerPath) || null;
+    const roots = [
+      stagingDirectory,
+      item.filePath,
+      path.join(downloadDirectory, INSTALLED_DIR_NAME),
+    ].filter(Boolean);
+
+    for (const root of roots) {
+      let found = null;
+      try {
+        found = findGameExecutable(root, { installerPath });
+      } catch (e) {
+        found = null;
+      }
+      if (!found) continue;
+
+      const name = path.basename(found.absolutePath, path.extname(found.absolutePath));
+      // A download folder is named after the release, which reads far better
+      // in the library than "Game-Win64-Shipping".
+      const game = {
+        name: safeName(item.filename.replace(/\.[^.]+$/, '')) || name,
+        executablePath: found.absolutePath,
+        size: typeof found.size === 'number' ? String(found.size) : null,
+        source: item.source || 'Installed',
+      };
+      try {
+        return this.onRegisterGame(game) || null;
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
   }
 
   /**

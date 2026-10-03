@@ -33,6 +33,7 @@ let updateCheckInProgress = false;
 let latestGitHubRelease = null;
 let pendingUpdatePath = null;
 let skippedVersion = null;
+let updateAbortController = null;
 
 function sendUpdateEvent(channel, payload = {}) {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -91,7 +92,7 @@ async function fetchLatestGitHubRelease() {
   };
 }
 
-async function downloadGitHubReleaseAsset(assetUrl, fileName) {
+async function downloadGitHubReleaseAsset(assetUrl, fileName, signal) {
   const tempDir = path.join(app.getPath('temp'), 'universal-freebie-updates');
   const finalPath = path.join(tempDir, fileName);
 
@@ -101,6 +102,7 @@ async function downloadGitHubReleaseAsset(assetUrl, fileName) {
     headers: {
       'User-Agent': 'Universal-Freebie-Updater',
     },
+    signal,
   });
 
   if (!response.ok) {
@@ -334,18 +336,37 @@ ipcMain.handle('update:start-download', async () => {
   if (updateCheckInProgress) return { status: 'checking' };
 
   updateCheckInProgress = true;
+  updateAbortController = new AbortController();
   try {
     const release = latestGitHubRelease || await fetchLatestGitHubRelease();
     latestGitHubRelease = release;
-    pendingUpdatePath = await downloadGitHubReleaseAsset(release.url, release.fileName);
+    pendingUpdatePath = await downloadGitHubReleaseAsset(release.url, release.fileName, updateAbortController.signal);
     updateDownloaded = true;
     updateCheckInProgress = false;
+    updateAbortController = null;
     sendUpdateEvent('update-downloaded', { version: release.version });
     return { status: 'downloaded' };
   } catch (error) {
     updateCheckInProgress = false;
+    updateAbortController = null;
+    if (error && error.name === 'AbortError') {
+      sendUpdateEvent('update-cancelled');
+      return { status: 'cancelled' };
+    }
     return { status: 'error', message: error.message || String(error) };
   }
+});
+
+ipcMain.handle('update:cancel', async () => {
+  updateCheckInProgress = false;
+  if (updateAbortController) {
+    updateAbortController.abort();
+    updateAbortController = null;
+  }
+  pendingUpdatePath = null;
+  updateDownloaded = false;
+  sendUpdateEvent('update-cancelled');
+  return { status: 'cancelled' };
 });
 
 ipcMain.handle('update:install', () => {

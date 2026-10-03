@@ -56,14 +56,26 @@ class Database {
 
   addDownloadToHistory(downloadItem) {
     const exists = this.data.downloadHistory.find(d => d.id === downloadItem.id);
+    const meta = downloadItem.meta ? {
+      source: downloadItem.meta.source,
+      title: downloadItem.meta.title,
+      quality: downloadItem.meta.quality,
+      description: downloadItem.meta.description,
+    } : undefined;
     if (exists) {
       // Update existing entry (e.g. resume → completed)
       Object.assign(exists, {
         filename: downloadItem.filename,
         url: downloadItem.url,
+        type: downloadItem.type || exists.type || 'http',
         totalBytes: downloadItem.totalBytes,
         downloadedBytes: downloadItem.downloadedBytes,
         source: downloadItem.meta?.source || exists.source,
+        meta: meta || exists.meta,
+        chunkSize: downloadItem.chunkSize || exists.chunkSize || null,
+        completedRanges: Array.isArray(downloadItem.completedRanges)
+          ? downloadItem.completedRanges
+          : exists.completedRanges || [],
         status: downloadItem.status || 'completed',
         dateCompleted: downloadItem.status === 'completed' ? new Date().toISOString() : exists.dateCompleted
       });
@@ -73,9 +85,13 @@ class Database {
         id: downloadItem.id,
         filename: downloadItem.filename,
         url: downloadItem.url,
+        type: downloadItem.type || 'http',
         totalBytes: downloadItem.totalBytes,
         downloadedBytes: downloadItem.downloadedBytes || 0,
         source: downloadItem.meta?.source || 'Unknown',
+        meta: meta || {},
+        chunkSize: downloadItem.chunkSize || null,
+        completedRanges: Array.isArray(downloadItem.completedRanges) ? downloadItem.completedRanges : [],
         status: downloadItem.status || 'downloading',
         dateStarted: new Date().toISOString(),
         dateCompleted: null

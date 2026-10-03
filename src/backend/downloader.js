@@ -347,6 +347,7 @@ class Downloader {
 
     const args = [
       '--no-playlist',
+      '--continue',
       '--js-runtimes', `node:${nodeBin}`,
       '--remote-components', 'ejs:github',
       '--extractor-args', 'youtube:player_client=web_embedded',
@@ -616,6 +617,8 @@ class Downloader {
           item.status = 'downloading';
           if (item.type === 'ytdlp') {
             this.startYtDlpDownload(item.url, item.filename, item.meta, item.id);
+          } else if (item.type === 'torrent') {
+            this.startTorrentDownload(item.url, item.meta, item.id);
           } else {
             this._performHttpDownload(item.id, item._resumeUrl || item.url, item.filePath, item._resumeFrom || 0);
           }
@@ -647,33 +650,36 @@ class Downloader {
 
       try {
         const rangeHeaders = { ...baseHeaders };
-        if (resumeFrom > 0) {
-          rangeHeaders['Range'] = `bytes=${resumeFrom}-`;
-        } else {
-          rangeHeaders['Range'] = 'bytes=0-0';
-        }
+        rangeHeaders['Range'] = 'bytes=0-0';
         const rangeRes = await axios.get(url, { 
           headers: rangeHeaders,
+          responseType: 'stream',
           timeout: 8000,
           signal: downloadItem._abortController ? downloadItem._abortController.signal : undefined
         });
-        
         if (rangeRes.status === 206) {
           acceptRanges = true;
-          const contentRange = rangeRes.headers['content-range'];
-          if (contentRange) {
-            totalBytes = parseInt(contentRange.split('/')[1], 10);
-          }
+          const contentRange = String(rangeRes.headers['content-range'] || '');
+          const match = contentRange.match(/^bytes\s+0-0\/(\d+)$/i);
+          if (match) totalBytes = Number(match[1]);
+        } else {
+          totalBytes = Number(rangeRes.headers['content-length']) || 0;
         }
+        if (rangeRes.data && typeof rangeRes.data.destroy === 'function') rangeRes.data.destroy();
       } catch (e) {
         console.warn('Range request failed, falling back to single thread:', e.message);
         return await this._singleThreadDownload(downloadItem, url, filePath, resumeFrom);
       }
 
-      if (!totalBytes) {
+      if (!acceptRanges || !totalBytes || (resumeFrom > 0 && !downloadItem.chunkSize)) {
         return await this._singleThreadDownload(downloadItem, url, filePath, resumeFrom);
       }
-      
+
+      if (downloadItem.totalBytes > 0 && downloadItem.totalBytes !== totalBytes) {
+        downloadItem.completedRanges = [];
+        downloadItem.chunkSize = null;
+        resumeFrom = 0;
+      }
       downloadItem.totalBytes = totalBytes;
 
       if (totalBytes < 1024 * 1024 * 5) {
@@ -681,14 +687,25 @@ class Downloader {
       }
 
       const settings = this._getSettings();
-      const CHUNKS = Math.min(settings.maxChunks, 128);
-      const chunkSize = Math.ceil(totalBytes / CHUNKS);
+      const chunkSize = downloadItem.chunkSize || Math.ceil(totalBytes / Math.min(settings.maxChunks, 128));
+      const CHUNKS = Math.ceil(totalBytes / chunkSize);
+      downloadItem.chunkSize = chunkSize;
+      if (!Array.isArray(downloadItem.completedRanges)) downloadItem.completedRanges = [];
+      if (!fs.existsSync(filePath)) downloadItem.completedRanges = [];
+      const completedKeys = new Set(downloadItem.completedRanges.map(range => `${range.start}-${range.end}`));
       const chunkBytes = new Array(CHUNKS).fill(0);
+      const ranges = Array.from({ length: CHUNKS }, (_, i) => {
+        const start = i * chunkSize;
+        const end = Math.min(totalBytes - 1, start + chunkSize - 1);
+        if (completedKeys.has(`${start}-${end}`)) chunkBytes[i] = end - start + 1;
+        return { start, end, index: i };
+      });
+      downloadItem.downloadedBytes = chunkBytes.reduce((sum, count) => sum + count, 0);
 
       // Preallocate the file asynchronously (sparse full-size file).
       // Never blocks the UI — the old fs.writeSync approach froze the
       // app into a "Not Responding" state during big downloads.
-      if (!resumeFrom) {
+      if (!resumeFrom || !fs.existsSync(filePath)) {
         try {
           const fh = await fs.promises.open(filePath, 'w');
           await fh.truncate(totalBytes);
@@ -703,7 +720,7 @@ class Downloader {
       let emittedOnce = false;
 
       const updateProgress = () => {
-        const downloaded = Math.min(totalBytes, (resumeFrom || 0) + chunkBytes.reduce((a, b) => a + b, 0));
+        const downloaded = Math.min(totalBytes, chunkBytes.reduce((a, b) => a + b, 0));
         downloadItem.downloadedBytes = downloaded;
         downloadItem.progress = (downloaded / totalBytes) * 100;
         const now = Date.now();
@@ -742,6 +759,13 @@ class Downloader {
                 signal: downloadItem._abortController ? downloadItem._abortController.signal : undefined,
                 maxRedirects: 5
               });
+              const contentRange = String(response.headers['content-range'] || '');
+              const rangeMatch = contentRange.match(/^bytes\s+(\d+)-(\d+)\/(\d+)$/i);
+              if (response.status !== 206 || !rangeMatch || Number(rangeMatch[1]) !== start
+                || Number(rangeMatch[2]) !== end || Number(rangeMatch[3]) !== totalBytes) {
+                response.data.destroy();
+                throw new Error('The server did not honor the requested byte range.');
+              }
               if (downloadItem.status === 'cancelled') {
                 response.data.destroy();
                 return finish();
@@ -779,7 +803,25 @@ class Downloader {
               writer.on('finish', () => {
                 if (downloadItem._writers) downloadItem._writers.delete(writer);
                 if (received < (end - start + 1)) fail(new Error('incomplete chunk'));
-                else finish();
+                else {
+                  const completed = new Set(downloadItem.completedRanges.map(range => `${range.start}-${range.end}`));
+                  const key = `${start}-${end}`;
+                  if (!completed.has(key)) {
+                    downloadItem.completedRanges.push({ start, end });
+                    downloadItem.completedRanges.sort((a, b) => a.start - b.start);
+                    db.updateDownloadHistory(downloadItem.id, {
+                      status: downloadItem.status,
+                      downloadedBytes: downloadItem.completedRanges.reduce(
+                        (sum, range) => sum + range.end - range.start + 1,
+                        0
+                      ),
+                      totalBytes: downloadItem.totalBytes || 0,
+                      chunkSize: downloadItem.chunkSize,
+                      completedRanges: downloadItem.completedRanges
+                    });
+                  }
+                  finish();
+                }
               });
               writer.on('error', fail);
               response.data.on('error', fail);
@@ -800,12 +842,9 @@ class Downloader {
       };
 
       // Pass 1: download every chunk in parallel (proxy-assisted).
-      let promises = [];
-      for (let i = 0; i < CHUNKS; i++) {
-        const start = i * chunkSize;
-        const end = i === CHUNKS - 1 ? totalBytes - 1 : (i + 1) * chunkSize - 1;
-        promises.push(downloadChunk(start, end, i, 0));
-      }
+      let promises = ranges
+        .filter(({ index }) => chunkBytes[index] === 0)
+        .map(({ start, end, index }) => downloadChunk(start, end, index, 0));
       await Promise.all(promises);
 
       // Repair passes: re-fetch any ranges still incomplete so a few
@@ -814,8 +853,7 @@ class Downloader {
         if (downloadItem.status === 'cancelled') break;
         const missing = [];
         for (let i = 0; i < CHUNKS; i++) {
-          const start = i * chunkSize;
-          const end = i === CHUNKS - 1 ? totalBytes - 1 : (i + 1) * chunkSize - 1;
+          const { start, end } = ranges[i];
           if (chunkBytes[i] < (end - start + 1)) missing.push([start, end, i]);
         }
         if (!missing.length) break;
@@ -828,8 +866,7 @@ class Downloader {
         // up even after repair passes) — never mark a corrupt file done.
         let allBytesPresent = true;
         for (let i = 0; i < CHUNKS; i++) {
-          const start = i * chunkSize;
-          const end = i === CHUNKS - 1 ? totalBytes - 1 : (i + 1) * chunkSize - 1;
+          const { start, end } = ranges[i];
           if (chunkBytes[i] < (end - start + 1)) { allBytesPresent = false; break; }
         }
         if (!allBytesPresent) {
@@ -893,18 +930,59 @@ class Downloader {
         maxRedirects: 5
       });
 
-      const isResume = status === 206;
-      const totalLength = headers['content-length'];
-      if (totalLength) {
-        downloadItem.totalBytes = isResume ? parseInt(totalLength, 10) + resumeFrom : parseInt(totalLength, 10);
+      const requestedResume = Math.max(0, Number(resumeFrom) || 0);
+      const isResume = requestedResume > 0 && status === 206;
+      const contentRange = headers['content-range'];
+      if (isResume) {
+        const rangeMatch = String(contentRange || '').match(/^bytes\s+(\d+)-\d+\/(\d+)$/i);
+        if (!rangeMatch || Number(rangeMatch[1]) !== requestedResume) {
+          data.destroy();
+          throw new Error('The server returned an invalid byte range; the partial download cannot be resumed safely.');
+        }
+        downloadItem.totalBytes = Number(rangeMatch[2]);
       }
+      const totalLength = headers['content-length'];
+      if (!isResume) downloadItem.totalBytes = Number(totalLength) || 0;
 
-      const writer = fs.createWriteStream(filePath, { flags: isResume ? 'r+' : 'w', highWaterMark: 1024 * 1024 * 4 });
+      const effectiveResumeFrom = isResume ? requestedResume : 0;
+      if (!isResume && requestedResume > 0) {
+        downloadItem.downloadedBytes = 0;
+        downloadItem.progress = 0;
+      }
+      const writer = fs.createWriteStream(filePath, {
+        flags: effectiveResumeFrom > 0 ? 'r+' : 'w',
+        ...(effectiveResumeFrom > 0 ? { start: effectiveResumeFrom } : {}),
+        highWaterMark: 1024 * 1024 * 4
+      });
       downloadItem._writers.add(writer);
-      let downloadedBytes = resumeFrom || 0;
+      let downloadedBytes = effectiveResumeFrom;
       let lastTime = Date.now();
       let lastBytes = downloadedBytes;
       let emittedOnce = false;
+      let streamEnded = false;
+      let writerFinished = false;
+
+      const finishIfReady = () => {
+        if (streamEnded && writerFinished && downloadItem.status !== 'cancelled' && downloadItem.status !== 'error') {
+          this._markCompleted(downloadItem);
+        }
+      };
+
+      const fail = (err) => {
+        if (downloadItem._writers) downloadItem._writers.delete(writer);
+        if (downloadItem.status === 'cancelled' || downloadItem.status === 'error') return;
+        downloadItem.status = 'error';
+        downloadItem.error = err.message;
+        downloadItem.speed = 0;
+        db.updateDownloadHistory(downloadItem.id, {
+          status: 'error',
+          downloadedBytes: downloadItem.downloadedBytes || 0,
+          totalBytes: downloadItem.totalBytes || 0,
+          error: err.message
+        });
+        this._emitProgress();
+        this._processQueue();
+      };
 
       data.on('data', (chunk) => {
         if (downloadItem.status === 'cancelled') {
@@ -935,46 +1013,19 @@ class Downloader {
       data.pipe(writer);
 
       data.on('end', () => {
-        if (downloadItem._writers) downloadItem._writers.delete(writer);
-        if (downloadItem.status !== 'cancelled' && downloadItem.status !== 'error') {
-          this._markCompleted(downloadItem);
-        }
+        streamEnded = true;
+        finishIfReady();
       });
 
-      data.on('error', (err) => {
+      writer.on('finish', () => {
         if (downloadItem._writers) downloadItem._writers.delete(writer);
-        if (downloadItem.status !== 'cancelled') {
-          downloadItem.status = 'error';
-          downloadItem.error = err.message;
-          downloadItem.speed = 0;
-          db.updateDownloadHistory(downloadItem.id, {
-            status: 'error',
-            downloadedBytes: downloadItem.downloadedBytes || 0,
-            totalBytes: downloadItem.totalBytes || 0,
-            error: err.message
-          });
-          this._emitProgress();
-          this._processQueue();
-        }
+        writerFinished = true;
+        finishIfReady();
       });
-
-      writer.on('error', (err) => {
-        if (downloadItem._writers) downloadItem._writers.delete(writer);
-        if (downloadItem.status !== 'cancelled') {
-          downloadItem.status = 'error';
-          downloadItem.error = err.message;
-          downloadItem.speed = 0;
-          db.updateDownloadHistory(downloadItem.id, {
-            status: 'error',
-            downloadedBytes: downloadItem.downloadedBytes || 0,
-            totalBytes: downloadItem.totalBytes || 0,
-            error: err.message
-          });
-          this._emitProgress();
-          this._processQueue();
-        }
-      });
+      data.on('error', fail);
+      writer.on('error', fail);
     } catch (err) {
+      if (downloadItem.status === 'cancelled') return;
       downloadItem.status = 'error';
       downloadItem.error = err.message;
       downloadItem.speed = 0;
@@ -989,8 +1040,8 @@ class Downloader {
     }
   }
 
-  startTorrentDownload(magnetURI, meta) {
-    const id = this.generateId();
+  startTorrentDownload(magnetURI, meta, existingId) {
+    const id = existingId || this.generateId();
     
     const settings = this._getSettings();
     const defaultTrackers = [
@@ -1017,7 +1068,7 @@ class Downloader {
       }
     });
     
-    const downloadItem = {
+    const downloadItem = this.downloads.get(id) || {
       id,
       url: enhancedMagnet,
       filename: 'Fetching Metadata...',
@@ -1031,6 +1082,13 @@ class Downloader {
       type: 'torrent',
       torrentInfo: null
     };
+    downloadItem.url = enhancedMagnet;
+    downloadItem.meta = meta || downloadItem.meta;
+    downloadItem.status = 'downloading';
+    downloadItem.speed = 0;
+    downloadItem.error = undefined;
+    downloadItem.type = 'torrent';
+    downloadItem.torrentInfo = null;
     
     this.downloads.set(id, downloadItem);
 
@@ -1074,10 +1132,12 @@ class Downloader {
       });
 
       torrent.on('done', () => {
+        if (downloadItem.status === 'cancelled') return;
         this._markCompleted(downloadItem);
       });
       
       torrent.on('error', (err) => {
+        if (downloadItem.status === 'cancelled') return;
         downloadItem.status = 'error';
         downloadItem.error = err.message;
         downloadItem.speed = 0;
@@ -1092,6 +1152,23 @@ class Downloader {
   cancelDownload(id) {
     const item = this.downloads.get(id);
     if (!item) return;
+
+    if (item.type === 'electron' && item.electronItem) {
+      try {
+        item.downloadedBytes = Math.max(item.downloadedBytes || 0, item.electronItem.getReceivedBytes() || 0);
+        item.electronItem.pause();
+      } catch (err) {}
+      item.status = 'interrupted';
+      item.speed = 0;
+      db.updateDownloadHistory(id, {
+        status: 'interrupted',
+        downloadedBytes: item.downloadedBytes || 0,
+        totalBytes: item.totalBytes || 0
+      });
+      this._emitProgress();
+      this._processQueue();
+      return;
+    }
 
     item.status = 'cancelled';
 
@@ -1152,8 +1229,30 @@ class Downloader {
       return;
     }
 
+    if (item.type === 'torrent') {
+      item.status = 'downloading';
+      item.speed = 0;
+      item.error = undefined;
+      db.updateDownloadHistory(item.id, {
+        status: 'downloading',
+        type: 'torrent',
+        downloadedBytes: item.downloadedBytes || 0,
+        totalBytes: item.totalBytes || 0
+      });
+      this._emitProgress();
+      this.startTorrentDownload(item.url, item.meta, item.id);
+      return;
+    }
+
     if (item.status === 'error' || item.status === 'cancelled' || item.status === 'interrupted') {
-      const resumeFrom = item.downloadedBytes || 0;
+      let resumeFrom = item.downloadedBytes || 0;
+      if (item.chunkSize && Array.isArray(item.completedRanges)) {
+        resumeFrom = item.completedRanges.reduce((sum, range) => sum + range.end - range.start + 1, 0);
+        item.downloadedBytes = resumeFrom;
+        item.progress = item.totalBytes ? (resumeFrom / item.totalBytes) * 100 : 0;
+        item._maxDownloadedBytes = resumeFrom;
+        item._maxProgress = item.progress;
+      }
       item.status = 'downloading';
       item.speed = 0;
       item.error = undefined;
@@ -1222,21 +1321,45 @@ class Downloader {
       return { success: true };
     }
 
+    if (history.type === 'torrent') {
+      this.downloads.set(id, {
+        id,
+        url: history.url,
+        filename: history.filename,
+        filePath: this.downloadsDir,
+        meta: history.meta || { source: history.source || 'Unknown' },
+        status: 'downloading',
+        progress: history.totalBytes ? Math.min(100, (history.downloadedBytes / history.totalBytes) * 100) : 0,
+        downloadedBytes: history.downloadedBytes || 0,
+        totalBytes: history.totalBytes || 0,
+        speed: 0,
+        type: 'torrent',
+        torrentInfo: null
+      });
+      this.startTorrentDownload(history.url, history.meta, id);
+      return { success: true };
+    }
+
     const filePath = path.join(this.downloadsDir, history.filename);
-    const resumeFrom = history.downloadedBytes || 0;
+    const completedRanges = Array.isArray(history.completedRanges) ? history.completedRanges : [];
+    const resumeFrom = history.chunkSize
+      ? completedRanges.reduce((sum, range) => sum + range.end - range.start + 1, 0)
+      : history.downloadedBytes || 0;
 
     const item = {
       id,
       url: history.url,
       filename: history.filename,
       filePath,
-      meta: { source: history.source || 'Unknown' },
+      meta: history.meta || { source: history.source || 'Unknown' },
       status: 'downloading',
       progress: history.totalBytes ? Math.min(100, (resumeFrom / history.totalBytes) * 100) : 0,
       downloadedBytes: resumeFrom,
       totalBytes: history.totalBytes || 0,
       speed: 0,
-      type: history.type || 'http'
+      type: history.type || 'http',
+      chunkSize: history.chunkSize || null,
+      completedRanges
     };
     this.downloads.set(id, item);
     db.updateDownloadHistory(item.id, {
@@ -1402,7 +1525,7 @@ class Downloader {
 
     item.on('updated', (event, state) => {
       if (state === 'interrupted') {
-        downloadItem.status = 'error';
+        downloadItem.status = 'interrupted';
         downloadItem.error = 'Download interrupted';
       } else if (state === 'progressing') {
         if (item.isPaused()) {

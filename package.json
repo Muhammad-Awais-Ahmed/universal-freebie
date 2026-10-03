@@ -17,6 +17,8 @@
     "test:cleanup": "node tools/test-cleanup-guard.js",
     "test:deps": "node tools/test-dependency-detection.js",
     "test:downloads": "node tools/test-download-progress-logic.js",
+    "test:proxies": "node tools/test-proxy-pool-target.js",
+    "test:resume": "node tools/test-resume-support.js && node tools/test-chunk-resume.js && node tools/test-download-history-resume.js && node tools/test-resume-protocols.js",
     "test:model": "node tools/test-model-fallback-logic.js",
     "test:update": "node tools/test-update-version-logic.js",
     "render:status": "node tools/render-env.js status",

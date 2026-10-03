@@ -16,7 +16,6 @@ const PROXY_SOURCES = [
   'https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt',
   'https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt',
   'https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt',
-  'https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt',
   'https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt',
   'https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/generated/http_proxies.txt',
   'https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/http/http.txt',
@@ -31,8 +30,8 @@ const PRIMARY_TEST_URL = 'http://www.gstatic.com/generate_204';
 const FALLBACK_TEST_URL = 'http://cp.cloudflare.com/generate_204';
 
 const VALIDATION_CONCURRENCY = 35; // parallel checks for fast speed
-const MAX_CANDIDATES = 600;        // candidates to test per full refresh
-const MAX_PROXIES = 60;            // keep the N fastest verified proxies
+const MIN_WORKING_PROXIES = 600;   // test until this many candidates pass validation
+const VALIDATION_BATCH_SIZE = 120;
 const TEST_TIMEOUT_MS = 3500;      // max wait per proxy test
 
 const state = {
@@ -88,6 +87,7 @@ function getStatus() {
     lastUpdated: state.lastUpdated,
     lastValidated: state.lastValidated,
     error: state.error,
+    lastError: state.error,
     sourcesCount: PROXY_SOURCES.length,
     proxies: working.slice(0, 16).map(p => ({
       host: p.host,
@@ -115,8 +115,11 @@ async function fetchRawCandidates() {
       for (const line of lines) {
         const t = line.trim();
         if (!t || t.startsWith('#')) continue;
+        // This pool validates HTTP proxies; SOCKS endpoints need a different agent.
+        const scheme = t.match(/^([a-z][a-z0-9+.-]*):\/\//i);
+        if (scheme && !/^https?$/i.test(scheme[1])) continue;
         // Parse host:port, http://host:port, or host:port:user:pass
-        const clean = t.replace(/^(?:https?|socks[45]):\/\//i, '');
+        const clean = t.replace(/^https?:\/\//i, '');
         const m = clean.match(/^([0-9a-zA-Z.-]+):(\d{2,5})/);
         if (!m) continue;
         const host = m[1];
@@ -182,6 +185,40 @@ async function testProxy(host, port, timeoutMs = TEST_TIMEOUT_MS) {
   return null;
 }
 
+async function testUntilTarget(candidates, initialWorking = []) {
+  const working = initialWorking.slice();
+  const known = new Set(working.map(p => `${p.host}:${p.port}`));
+  let staleCount = 0;
+
+  for (let offset = 0; offset < candidates.length && working.length < MIN_WORKING_PROXIES; offset += VALIDATION_BATCH_SIZE) {
+    const batch = candidates
+      .slice(offset, offset + VALIDATION_BATCH_SIZE)
+      .filter(candidate => !known.has(`${candidate.host}:${candidate.port}`));
+    let idx = 0;
+
+    async function worker() {
+      while (idx < batch.length && working.length < MIN_WORKING_PROXIES) {
+        const candidate = batch[idx++];
+        const latency = await testProxy(candidate.host, candidate.port);
+        const key = `${candidate.host}:${candidate.port}`;
+        if (latency !== null) {
+          if (!known.has(key)) {
+            known.add(key);
+            working.push({ host: candidate.host, port: candidate.port, latencyMs: latency, lastChecked: Date.now() });
+          }
+        } else {
+          staleCount++;
+        }
+      }
+    }
+
+    await Promise.all(Array.from({ length: Math.min(VALIDATION_CONCURRENCY, batch.length) }, () => worker()));
+  }
+
+  working.sort((a, b) => a.latencyMs - b.latencyMs);
+  return { working: working.slice(0, MIN_WORKING_PROXIES), staleCount };
+}
+
 /**
  * Validating mechanism:
  * Re-tests all currently loaded / active proxies, eliminates stale ones,
@@ -193,41 +230,21 @@ async function validateProxies() {
   state.error = null;
 
   try {
-    // Test active proxies plus up to 120 fresh candidates from reserve
-    const targets = state.proxies.slice();
-    if (state.rawCandidates.length) {
-      const activeKeys = new Set(targets.map(p => `${p.host}:${p.port}`));
-      const fresh = state.rawCandidates.filter(c => !activeKeys.has(`${c.host}:${c.port}`));
-      targets.push(...fresh.slice(0, 120));
-    } else {
-      await fetchRawCandidates();
-      targets.push(...state.rawCandidates.slice(0, 150));
-    }
+    const active = state.proxies.slice();
+    if (!state.rawCandidates.length) await fetchRawCandidates();
 
-    const working = [];
-    let staleCount = 0;
-    let idx = 0;
+    const activeKeys = new Set(active.map(p => `${p.host}:${p.port}`));
+    const fresh = state.rawCandidates.filter(c => !activeKeys.has(`${c.host}:${c.port}`));
+    const checkedActive = await testUntilTarget(active);
+    const checked = await testUntilTarget(fresh, checkedActive.working);
 
-    async function worker() {
-      while (idx < targets.length) {
-        const cur = idx++;
-        const p = targets[cur];
-        const latency = await testProxy(p.host, p.port, 3000);
-        if (latency !== null) {
-          working.push({ host: p.host, port: p.port, latencyMs: latency, lastChecked: Date.now() });
-        } else {
-          staleCount++;
-        }
-      }
-    }
-
-    await Promise.all(Array.from({ length: VALIDATION_CONCURRENCY }, () => worker()));
-
-    working.sort((a, b) => a.latencyMs - b.latencyMs);
-    state.proxies = working.slice(0, MAX_PROXIES);
-    state.stats.staleRemoved += staleCount;
+    state.proxies = checked.working;
+    state.stats.staleRemoved += checkedActive.staleCount + checked.staleCount;
     state.cursor = 0;
     state.lastValidated = Date.now();
+    if (state.proxies.length < MIN_WORKING_PROXIES) {
+      state.error = `Only ${state.proxies.length} verified proxies were available after testing all candidates.`;
+    }
   } catch (err) {
     state.error = err.message;
   } finally {
@@ -239,8 +256,8 @@ async function validateProxies() {
 
 /**
  * Refresh the pool from GitHub:
- * Downloads fresh proxy lists from 12+ GitHub repos, tests candidates in parallel,
- * keeps the fastest verified working proxies, and drops stale ones.
+ * Downloads proxy lists, testing batches until 600 working proxies are found
+ * or every fetched candidate has been checked.
  */
 async function refreshProxyPool() {
   if (state.updating) return getStatus();
@@ -249,32 +266,15 @@ async function refreshProxyPool() {
 
   try {
     const candidates = await fetchRawCandidates();
-    const testSlice = candidates.slice(0, MAX_CANDIDATES);
-    const working = [];
-    let staleCount = 0;
-    let idx = 0;
-
-    async function worker() {
-      while (idx < testSlice.length) {
-        const cur = idx++;
-        const c = testSlice[cur];
-        const latency = await testProxy(c.host, c.port);
-        if (latency !== null) {
-          working.push({ host: c.host, port: c.port, latencyMs: latency, lastChecked: Date.now() });
-        } else {
-          staleCount++;
-        }
-      }
-    }
-
-    await Promise.all(Array.from({ length: VALIDATION_CONCURRENCY }, () => worker()));
-
-    working.sort((a, b) => a.latencyMs - b.latencyMs);
-    state.proxies = working.slice(0, MAX_PROXIES);
-    state.stats.staleRemoved += staleCount;
+    const result = await testUntilTarget(candidates);
+    state.proxies = result.working;
+    state.stats.staleRemoved += result.staleCount;
     state.cursor = 0;
     state.lastUpdated = Date.now();
     state.lastValidated = Date.now();
+    if (state.proxies.length < MIN_WORKING_PROXIES) {
+      state.error = `Only ${state.proxies.length} verified proxies were available after testing all candidates.`;
+    }
   } catch (err) {
     state.error = err.message;
   } finally {

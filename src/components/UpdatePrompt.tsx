@@ -36,6 +36,12 @@ export default function UpdatePrompt() {
       setError(info.message || "The update could not be downloaded.");
       setState("error");
     };
+    const onCancelled = () => {
+      setError("");
+      setUpdate(null);
+      setState(null);
+      setProgress(0);
+    };
 
     // The main process only emits this when the published release is not
     // newer than the running build, or when the user already skipped it.
@@ -50,6 +56,7 @@ export default function UpdatePrompt() {
     ipcRenderer.on("update-download-progress", onProgress);
     ipcRenderer.on("update-downloaded", onDownloaded);
     ipcRenderer.on("update-error", onError);
+    ipcRenderer.on("update-cancelled", onCancelled);
     ipcRenderer.on("update-not-available", onNotAvailable);
 
     return () => {
@@ -57,6 +64,7 @@ export default function UpdatePrompt() {
       ipcRenderer.removeListener("update-download-progress", onProgress);
       ipcRenderer.removeListener("update-downloaded", onDownloaded);
       ipcRenderer.removeListener("update-error", onError);
+      ipcRenderer.removeListener("update-cancelled", onCancelled);
       ipcRenderer.removeListener("update-not-available", onNotAvailable);
     };
   }, []);
@@ -92,6 +100,15 @@ export default function UpdatePrompt() {
     await ipcRenderer.invoke("update:skip", version);
   };
 
+  const cancel = async () => {
+    setError("");
+    setUpdate(null);
+    setState(null);
+    setProgress(0);
+    const { ipcRenderer } = window.require("electron");
+    await ipcRenderer.invoke("update:cancel");
+  };
+
   return (
     <div className="update-overlay" role="dialog" aria-modal="true" aria-labelledby="update-title">
       <div className="update-card">
@@ -122,7 +139,11 @@ export default function UpdatePrompt() {
           {state !== "downloading" && (
             <button className="update-button update-button-muted" onClick={checkForUpdates}>Check for updates</button>
           )}
-          {state !== "downloading" && <button className="update-button update-button-muted" onClick={dismiss}>Later</button>}
+          {state === "downloading" ? (
+            <button className="update-button update-button-muted" onClick={cancel}>Cancel</button>
+          ) : (
+            <button className="update-button update-button-muted" onClick={dismiss}>Later</button>
+          )}
         </div>
       </div>
     </div>

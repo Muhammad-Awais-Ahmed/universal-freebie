@@ -194,7 +194,7 @@ class AutoInstaller extends EventEmitter {
     if (settings.autoLaunchInstaller === false) {
       this._publish(item.id, {
         phase: 'awaiting-manual-install',
-        message: 'Download kept — start the installer yourself.',
+        message: 'Installer is ready — start it yourself to finish the setup.',
       });
       return;
     }
@@ -214,9 +214,9 @@ class AutoInstaller extends EventEmitter {
       return;
     }
 
-    // ---- 4. Wait for it, then clean up ---------------------------------
+    const finished = await this._waitForInstaller(plan.installerPath, item.id);
+
     if (settings.autoDeleteAfterInstall === true) {
-      const finished = await this._waitForInstaller(plan.installerPath, item.id);
       if (finished) {
         // Register the game BEFORE the staging tree is deleted: for in-place /
         // "portable" repacks the runnable binary is the thing being removed.
@@ -253,14 +253,30 @@ class AutoInstaller extends EventEmitter {
       return;
     }
 
-    // ---- 5. Register the game in the library ---------------------------
-    // Only safe to scan here: the installer has just been handed the user's
-    // files but may still be writing, and a half-extracted tree would yield a
-    // bogus executable. When the download is kept, the user decides when the
-    // game is ready via the "Add to Library" button.
+    // Register the game once the installer is actually finished, even when the
+    // download is preserved in-place. This keeps the post-install flow real-time
+    // and makes the library update happen without any extra user click.
+    if (finished) {
+      const library = this._registerInLibrary({
+        item,
+        plan,
+        stagingDirectory,
+        downloadDirectory,
+      });
+
+      this._publish(item.id, {
+        phase: 'installed',
+        message: library
+          ? `Installation finished. Added "${library.name}" to your library.`
+          : 'Installation finished. The game is ready — add it to the library from the Library page if needed.',
+        library,
+      });
+      return;
+    }
+
     this._publish(item.id, {
-      phase: 'installed',
-      message: 'Installer started. Downloaded files were kept.',
+      phase: 'installing',
+      message: 'Waiting for the installer to finish…',
     });
   }
 

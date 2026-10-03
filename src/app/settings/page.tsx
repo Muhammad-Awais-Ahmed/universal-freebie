@@ -35,6 +35,7 @@ interface ProxyStatus {
   lastUpdatedAt: number | null;
   lastValidated: number | null;
   lastError: string | null;
+  error?: string | null;
   sourcesCount: number;
   proxies: { host: string; port: number; latency: number }[];
 }
@@ -202,6 +203,7 @@ export default function SettingsPage() {
                 Browse
               </button>
             </div>
+            <p className={styles.proxyNote}>Use one folder for all game downloads so installs, resumes, and library entries stay organized.</p>
           </div>
         </div>
 
@@ -223,6 +225,7 @@ export default function SettingsPage() {
               onChange={(e) => setMaxConcurrent(parseInt(e.target.value))}
               className={styles.slider}
             />
+            <p className={styles.proxyNote}>Controls how many game downloads can run at the same time for faster batch installs.</p>
           </div>
           <div className={styles.field}>
             <label className={styles.label}>
@@ -237,6 +240,7 @@ export default function SettingsPage() {
               onChange={(e) => setMaxChunks(parseInt(e.target.value))}
               className={styles.slider}
             />
+            <p className={styles.proxyNote}>Splits each file across more parallel reads to improve throughput on large downloads.</p>
           </div>
         </div>
 
@@ -261,6 +265,7 @@ export default function SettingsPage() {
             <p className={styles.proxyNote}>
               Automatically aggregates public HTTP/SOCKS endpoints, pings them with ultra-low latency test probes, and routes file chunk requests through fast peers in parallel.
             </p>
+            <p className={styles.proxyNote}>Uses public GitHub peer nodes to reduce speed bottlenecks when downloading large game files.</p>
           </div>
 
           {/* Proxy Metrics Dashboard */}
@@ -359,11 +364,13 @@ export default function SettingsPage() {
               ? "Fetching candidate proxies from GitHub and testing fastest peers…"
               : validatingProxies
               ? "Validating active proxies and pruning dead/stale endpoints…"
+              : proxyStatus?.error || proxyStatus?.lastError
+              ? (proxyStatus.error || proxyStatus.lastError)
               : proxyStatus?.lastValidated
               ? `Last validated: ${new Date(proxyStatus.lastValidated).toLocaleTimeString()}`
               : proxyStatus?.totalLoaded
-              ? "Proxies loaded. Click Validate to prune stale ones."
-              : "Click 'Fetch & Refresh Pool' to load free open-source proxies."}
+              ? `Verified ${proxyStatus.workingCount} working proxies. Target: 600.`
+              : "Click 'Fetch & Refresh Pool' to load and verify at least 600 working HTTP proxies."}
           </div>
 
           {/* Top Working Proxies Preview */}
@@ -416,6 +423,7 @@ export default function SettingsPage() {
               Games are only ever touched inside your download folder. No account or API key is
               needed.
             </p>
+            <p className={styles.proxyNote}>Auto-installs the detected setup file and adds the finished game to your library when setup completes.</p>
           </div>
 
           {autoInstallEnabled && (
@@ -438,6 +446,7 @@ export default function SettingsPage() {
                   installs only the ones that are actually missing, using a bundled copy when the
                   download ships one.
                 </p>
+                <p className={styles.proxyNote}>Installs only the missing runtimes required for the selected game so setup stays reliable.</p>
               </div>
 
               <div className={styles.field}>
@@ -453,6 +462,7 @@ export default function SettingsPage() {
                     Launch the game installer
                   </span>
                 </label>
+                <p className={styles.proxyNote}>Starts the detected setup program automatically so it can install without extra clicks.</p>
               </div>
 
               <div className={styles.field}>
@@ -472,6 +482,7 @@ export default function SettingsPage() {
                   Removes the archive and the extracted files once the installer exits. If the
                   installer is still running, the files are kept. The installed game is never deleted.
                 </p>
+                <p className={styles.proxyNote}>Cleans up the download artifacts after a successful install to keep your storage tidy.</p>
               </div>
             </>
           )}
@@ -493,6 +504,7 @@ export default function SettingsPage() {
               published. If one exists, the update screen opens and you choose what
               happens next.
             </p>
+            <p className={styles.proxyNote}>Manual update checks only; no surprise update prompt appears when the app starts.</p>
           </div>
 
           <div className={styles.proxyActionsRow}>

@@ -41,8 +41,6 @@ The update experience is now user-driven and explicit through the Settings page.
 
 ## Supported sources
 
-- ApunKaGames
-- FileCR
 - FitGirl
 - SteamUnlocked
 - Archive.org

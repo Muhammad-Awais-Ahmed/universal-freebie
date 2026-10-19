@@ -7,6 +7,12 @@ const SEARCH_MAX_PAGES = 4;
 // Fetch detail pages for EVERY result so size/year are never missing.
 // Concurrency is capped (DETAIL_CONCURRENCY) to avoid hammering the site.
 const DETAIL_CONCURRENCY = 4;
+// Time budgets keep search realtime: page scrolling stops after
+// SEARCH_TIME_BUDGET_MS and detail enrichment after DETAIL_TIME_BUDGET_MS,
+// returning whatever has been collected (remaining items keep placeholder
+// size/year) instead of making the user wait on slow responses.
+const SEARCH_TIME_BUDGET_MS = 6000;
+const DETAIL_TIME_BUDGET_MS = 5000;
 
 async function mapWithConcurrency(items, limit, mapper) {
   const results = new Array(items.length);
@@ -24,8 +30,11 @@ async function mapWithConcurrency(items, limit, mapper) {
 async function searchSteamUnlocked(query) {
   const results = [];
   const seen = new Set();
+  const searchStart = Date.now();
   try {
     for (let page = 1; page <= SEARCH_MAX_PAGES; page++) {
+      // Stop paging once the search budget is spent; we already have results.
+      if (Date.now() - searchStart >= SEARCH_TIME_BUDGET_MS) break;
       const url = page === 1
         ? `https://steamunlocked.org/?s=${encodeURIComponent(query)}`
         : `https://steamunlocked.org/?s=${encodeURIComponent(query)}&page=${page}`;
@@ -34,7 +43,7 @@ async function searchSteamUnlocked(query) {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         },
-        timeout: 20000
+        timeout: Math.min(20000, Math.max(1000, SEARCH_TIME_BUDGET_MS - (Date.now() - searchStart)))
       });
 
       const $ = cheerio.load(response.data);
@@ -74,14 +83,17 @@ async function searchSteamUnlocked(query) {
     }
 
     // Fetch detail pages for ALL results so size/year are never missing.
-    // Concurrency is capped to avoid hammering the site.
+    // Concurrency is capped to avoid hammering the site, and the whole phase
+    // is bounded by DETAIL_TIME_BUDGET_MS so search stays responsive.
+    const detailDeadline = Date.now() + DETAIL_TIME_BUDGET_MS;
     await mapWithConcurrency(results, DETAIL_CONCURRENCY, async (game) => {
+      if (Date.now() >= detailDeadline) return;
       try {
         const detailResponse = await axios.get(game.url, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
           },
-          timeout: 15000
+          timeout: Math.min(15000, Math.max(1000, detailDeadline - Date.now()))
         });
         const $detail = cheerio.load(detailResponse.data);
         

@@ -17,6 +17,7 @@ const proxyPool = require('../src/backend/proxyPool');
 const { discoverInstalledGames, lookupWebIcon } = require('../src/backend/gameLibrary');
 const { planInstall, runInstaller, installMissingDependencies, cleanupDownloadArtifacts, pruneEmptyStaging, findGameExecutable, STAGING_DIR_NAME, INSTALLED_DIR_NAME } = require('../src/backend/aiInstaller');
 const { AutoInstaller } = require('../src/backend/autoInstall');
+const { getFeaturedGamesMeta } = require('../src/backend/featuredGames');
 
 let globalDownloader = null;
 let autoInstaller = null;
@@ -2656,5 +2657,19 @@ ipcMain.handle('search-games', async (event, query, sources) => {
   } catch (error) {
     console.error('Unified Game Search failed:', error);
     return [];
+  }
+});
+
+// Featured suggestion metadata: enrich curated catalog entries with official
+// Steam descriptions/artwork (cached on disk; failures fall back to the
+// catalog's built-in descriptions).
+ipcMain.handle('get-featured-games-meta', async (event, entries) => {
+  try {
+    return await getFeaturedGamesMeta(entries, {
+      cachePath: path.join(app.getPath('userData'), 'featured-meta.json'),
+    });
+  } catch (error) {
+    console.error('Featured games metadata failed:', error);
+    return {};
   }
 });

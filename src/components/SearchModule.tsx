@@ -19,6 +19,7 @@ export default function SearchModule({
   emptyTitle,
   emptyText,
   toolbar,
+  suggestions,
   children,
 }: {
   title: string;
@@ -35,6 +36,7 @@ export default function SearchModule({
   emptyTitle?: string;
   emptyText?: string;
   toolbar?: React.ReactNode;
+  suggestions?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -100,7 +102,8 @@ export default function SearchModule({
       </div>
 
       <div className={styles.resultsArea}>
-        {isSearching && (
+        {/* Full-screen loader only when there is nothing to preview yet. */}
+        {isSearching && React.Children.count(children) === 0 && (
           <div className={styles.loadingState}>
             <div className={styles.spinner} />
             <p className="font-gaming text-sm tracking-wider uppercase text-blue-400">
@@ -109,11 +112,20 @@ export default function SearchModule({
           </div>
         )}
 
+        {/* Thin progress bar while existing results stay visible underneath. */}
+        {isSearching && React.Children.count(children) > 0 && (
+          <div className={styles.progressTrack} aria-hidden="true">
+            <div className={styles.progressBar} />
+          </div>
+        )}
+
+        {!hasSearched && suggestions && <div>{suggestions}</div>}
+
         {!isSearching && hasSearched && toolbar && (
           <div className={styles.toolbarWrapper}>{toolbar}</div>
         )}
 
-        {!isSearching && hasSearched && React.Children.count(children) > 0 && (
+        {hasSearched && React.Children.count(children) > 0 && (
           <div className={styles.grid}>{children}</div>
         )}
 

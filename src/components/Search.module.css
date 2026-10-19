@@ -203,6 +203,28 @@
   to { transform: rotate(360deg); }
 }
 
+/* Thin indeterminate progress bar shown while existing results stay visible */
+.progressTrack {
+  height: 4px;
+  background: rgba(14, 17, 26, 0.8);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.progressBar {
+  height: 100%;
+  width: 35%;
+  background: linear-gradient(90deg, #7c3aed, #22d3ee);
+  border-radius: 999px;
+  animation: progressSlide 1.1s ease-in-out infinite;
+}
+
+@keyframes progressSlide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(340%); }
+}
+
 .emptyState {
   text-align: center;
   padding: 60px 0;

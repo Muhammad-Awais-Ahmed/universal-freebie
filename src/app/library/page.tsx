@@ -64,7 +64,10 @@ export default function LibraryPage() {
   const [addSize, setAddSize] = useState("");
   const [addYear, setAddYear] = useState("");
   const [addSource, setAddSource] = useState("Manual");
+  const [addThumbnail, setAddThumbnail] = useState("");
   const [saving, setSaving] = useState(false);
+  const [detecting, setDetecting] = useState(false);
+  const [lookingUpIcon, setLookingUpIcon] = useState(false);
   const [notice, setNotice] = useState("");
   const [launchingId, setLaunchingId] = useState<string | null>(null);
 
@@ -113,6 +116,7 @@ export default function LibraryPage() {
     } catch (err) {
       console.error("Failed to load folder contents:", err);
       setFolderEntries([]);
+      setNotice("Could not load the downloads folder contents.");
     } finally {
       setFolderLoading(false);
     }
@@ -124,10 +128,15 @@ export default function LibraryPage() {
 
   const deleteEntry = async (entry: FolderEntry) => {
     try {
-      await invoke("delete-file", entry.path);
+      const result = await invoke("delete-file", entry.path);
+      if (result && result.ok === false) {
+        setNotice(result.error || "Could not delete the selected item.");
+        return;
+      }
       await loadFolderContents();
     } catch (err) {
       console.error("Delete failed:", err);
+      setNotice("Could not delete the selected item.");
     }
   };
 
@@ -158,13 +167,65 @@ export default function LibraryPage() {
 
   const pickExecutable = async () => {
     try {
-      const res = await invoke("add-installed-game");
+      const res = await invoke("select-game-executable");
       if (res && res.ok) {
-        setNotice(`Added "${res.game?.name || "game"}" to your library.`);
-        await loadLibrary();
+        setAddName((current) => current.trim() ? current : res.name || "");
+        setAddPath(res.executablePath || "");
+        setNotice("Executable selected. Add the game to save it to your library.");
+      } else if (res?.error) {
+        setNotice(res.error);
       }
     } catch (err) {
       console.error("Add game failed:", err);
+      setNotice("Could not select the game executable.");
+    }
+  };
+
+  const findWebIcon = async () => {
+    if (!addName.trim()) {
+      setNotice("Enter the game name before searching for an icon.");
+      return;
+    }
+    setLookingUpIcon(true);
+    setNotice("");
+    try {
+      const result = await invoke("lookup-game-icon", addName.trim());
+      if (result?.ok && result.thumbnail) {
+        setAddThumbnail(result.thumbnail);
+        setNotice("Game artwork found from the Steam Store.");
+      } else {
+        setNotice(result?.error || "No web artwork was found for this game.");
+      }
+    } catch (err) {
+      console.error("Web icon lookup failed:", err);
+      setNotice("Could not search for game artwork.");
+    } finally {
+      setLookingUpIcon(false);
+    }
+  };
+
+  const detectInstalledGames = async () => {
+    setDetecting(true);
+    setNotice("");
+    try {
+      const result = await invoke("detect-installed-games");
+      if (!result?.ok) {
+        setNotice(result?.error || "Could not detect installed games.");
+        return;
+      }
+      setInstalled(Array.isArray(result.games) ? result.games : []);
+      const countText = result.added === 1 ? "1 game added" : `${result.added} games added`;
+      const iconText = result.iconsMissing
+        ? ` Artwork was unavailable for ${result.iconsMissing} game${result.iconsMissing === 1 ? "" : "s"}.`
+        : " Web artwork was added for every detected game.";
+      setNotice(result.detected === 0
+        ? "No installed games were found in the supported Steam, Epic, GOG, Ubisoft, EA, or common game folders."
+        : `${countText}; ${result.alreadyInLibrary} already in your library.${iconText}`);
+    } catch (err) {
+      console.error("Game detection failed:", err);
+      setNotice("Could not detect installed games.");
+    } finally {
+      setDetecting(false);
     }
   };
 
@@ -183,6 +244,7 @@ export default function LibraryPage() {
         size: addSize.trim() || null,
         year: addYear.trim() || null,
         source: addSource.trim() || "Manual",
+        thumbnail: addThumbnail.trim() || null,
       });
       if (res && res.ok) {
         setNotice(`Added "${res.game?.name || addName}" to your library.`);
@@ -191,6 +253,7 @@ export default function LibraryPage() {
         setAddSize("");
         setAddYear("");
         setAddSource("Manual");
+        setAddThumbnail("");
         setShowAddForm(false);
         await loadLibrary();
       } else {
@@ -262,6 +325,10 @@ export default function LibraryPage() {
                 <p>Add a game executable to your library to launch it straight from the app.</p>
                 <div className={styles.dirPath}>{downloadDir}</div>
                 <div className={styles.emptyActions}>
+                  <button className={styles.openBtn} onClick={detectInstalledGames} disabled={detecting}>
+                    {detecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderSearch className="w-4 h-4" />}
+                    {detecting ? "Scanning…" : "Detect Games"}
+                  </button>
                   <button className={styles.openBtn} onClick={() => openFolder()}>
                     <FolderOpen className="w-4 h-4" />
                     Open Downloads Folder
@@ -276,6 +343,10 @@ export default function LibraryPage() {
               <>
                 <div className={styles.listHeader}>
                   <div className={styles.listHeaderActions}>
+                    <button className={styles.openBtn} style={{ marginTop: 0 }} onClick={detectInstalledGames} disabled={detecting}>
+                      {detecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderSearch className="w-4 h-4" />}
+                      {detecting ? "Scanning…" : "Detect Games"}
+                    </button>
                     <button className={styles.openBtn} style={{ marginTop: 0 }} onClick={() => openFolder()}>
                       <FolderOpen className="w-4 h-4" />
                       Open Downloads Folder
@@ -347,6 +418,31 @@ export default function LibraryPage() {
                           placeholder="e.g. Steam, Epic, Manual"
                         />
                       </label>
+                      <label className={styles.addField}>
+                        <span>Icon Image URL (HTTPS)</span>
+                        <div className={styles.pathInputWrap}>
+                          <input
+                            type="url"
+                            value={addThumbnail}
+                            onChange={(e) => setAddThumbnail(e.target.value)}
+                            placeholder="https://…"
+                          />
+                          <button
+                            type="button"
+                            className={styles.browseBtn}
+                            onClick={findWebIcon}
+                            title="Find game artwork from the Steam Store"
+                            disabled={lookingUpIcon}
+                          >
+                            {lookingUpIcon ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <ExternalLink className="w-4 h-4" />
+                            )}
+                            {lookingUpIcon ? "Searching…" : "Find Online"}
+                          </button>
+                        </div>
+                      </label>
                     </div>
                     <div className={styles.addFormActions}>
                       <button type="button" className={styles.cancelBtn} onClick={() => setShowAddForm(false)}>
@@ -372,6 +468,17 @@ export default function LibraryPage() {
                     <div key={game.id} className={styles.listItem}>
                       <div className={styles.listIconWrapper}>
                         <Gamepad2 className="w-5 h-5" />
+                        {game.thumbnail && (
+                          <img
+                            className={styles.gameThumbnail}
+                            src={game.thumbnail}
+                            alt=""
+                            loading="lazy"
+                            onError={(event) => {
+                              event.currentTarget.style.display = "none";
+                            }}
+                          />
+                        )}
                       </div>
                       <div className={styles.listInfo}>
                         <h4>{game.name}</h4>

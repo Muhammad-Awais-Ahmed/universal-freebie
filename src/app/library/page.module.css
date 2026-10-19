@@ -118,6 +118,7 @@
   box-shadow: 0 2px 12px rgba(124,58,237,0.35);
 }
 .openBtn:hover { transform: translateY(-2px); box-shadow: 0 6px 22px rgba(124,58,237,0.6); border-color: #c4b5fd; }
+.openBtn:disabled { opacity: 0.6; cursor: wait; transform: none; }
 
 .list { display: flex; flex-direction: column; gap: 12px; }
 
@@ -141,7 +142,16 @@
   background: rgba(124,58,237,0.12);
   border: 1px solid rgba(124,58,237,0.3);
   display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; color: #7c3aed;
+  flex-shrink: 0; color: #7c3aed; position: relative; overflow: hidden;
+}
+
+.gameThumbnail {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
 }
 
 .listInfo { flex-grow: 1; min-width: 0; }
@@ -332,6 +342,7 @@
   transition: all 0.2s;
 }
 .browseBtn:hover { background: rgba(6, 182, 212, 0.2); color: #fff; }
+.browseBtn:disabled { opacity: 0.6; cursor: wait; }
 
 .addFormActions {
   display: flex;

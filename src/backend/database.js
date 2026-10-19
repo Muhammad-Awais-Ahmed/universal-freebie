@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { randomUUID } = require('crypto');
 const { app } = require('electron');
 
 class Database {
@@ -138,17 +139,37 @@ class Database {
   }
 
   addInstalledGame(game) {
-    this.data.installedGames.push({
-      id: Date.now().toString(),
+    const executablePath = String(game.executablePath || '').trim();
+    const normalizedExecutablePath = path.resolve(executablePath).toLowerCase();
+    const existing = this.data.installedGames.find((entry) => (
+      path.resolve(String(entry.executablePath || '')).toLowerCase() === normalizedExecutablePath
+    ));
+    if (existing) {
+      Object.assign(existing, {
+        name: game.name || existing.name,
+        executablePath,
+        size: game.size || existing.size || null,
+        year: game.year || existing.year || null,
+        source: game.source || existing.source || 'Manual',
+        thumbnail: game.thumbnail || existing.thumbnail || null
+      });
+      this._saveData();
+      return existing;
+    }
+
+    const installedGame = {
+      id: randomUUID(),
       name: game.name,
-      executablePath: game.executablePath,
+      executablePath,
       size: game.size || null,
       year: game.year || null,
       source: game.source || 'Manual',
       thumbnail: game.thumbnail || null,
       dateAdded: new Date().toISOString()
-    });
+    };
+    this.data.installedGames.push(installedGame);
     this._saveData();
+    return installedGame;
   }
 
   removeInstalledGame(id) {

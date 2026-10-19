@@ -15,7 +15,9 @@ It combines a search UI, intelligent download tracking, a game library, and opti
 - Download history with per-item status and progress persistence
 - Manual app update checks from Settings (no forced update prompt on startup)
 - Game Library page for installed games, download history, and local storage browsing
-- Add Game flow for manual library registration
+- Detect Games scans Steam and Epic manifests plus common GOG, Ubisoft, EA, and game folders on Windows
+- Game artwork can be searched from the Steam Store or added as an HTTPS image URL
+- Add Game flow for manual library registration, including executable browsing
 - Optional AI automatic installation pipeline
   - identifies the real installer in a finished download
   - installs missing system dependencies when needed

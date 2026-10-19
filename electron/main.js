@@ -14,6 +14,7 @@ const { searchFileCR } = require('../src/backend/providers/fileCR');
 const Downloader = require('../src/backend/downloader');
 const db = require('../src/backend/database');
 const proxyPool = require('../src/backend/proxyPool');
+const { discoverInstalledGames, lookupWebIcon } = require('../src/backend/gameLibrary');
 const { planInstall, runInstaller, installMissingDependencies, cleanupDownloadArtifacts, pruneEmptyStaging, findGameExecutable, STAGING_DIR_NAME, INSTALLED_DIR_NAME } = require('../src/backend/aiInstaller');
 const { AutoInstaller } = require('../src/backend/autoInstall');
 
@@ -39,6 +40,18 @@ function sendUpdateEvent(channel, payload = {}) {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send(channel, payload);
   }
+}
+
+function isPathInside(rootPath, candidatePath) {
+  const relativePath = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
+  return relativePath !== '' &&
+    !relativePath.startsWith(`..${path.sep}`) &&
+    relativePath !== '..' &&
+    !path.isAbsolute(relativePath);
+}
+
+function isLaunchableGameFile(filePath) {
+  return ['.exe', '.bat', '.cmd', '.lnk'].includes(path.extname(filePath).toLowerCase());
 }
 
 // Turns "1.0.17", "v1.0.17" or "1.0.17-beta.2" into [1,0,17] so two
@@ -2196,26 +2209,20 @@ ipcMain.handle('open-download-dir', () => {
 ipcMain.handle('get-download-history', () => db.getDownloadHistory());
 
 ipcMain.handle('get-folder-contents', () => {
-  const dir = db.getSettings().downloadDirectory;
+  const dir = path.resolve(db.getSettings().downloadDirectory);
   if (!fs.existsSync(dir)) return [];
-  
-  try {
-    const files = fs.readdirSync(dir);
-    return files.map(filename => {
-      const fullPath = path.join(dir, filename);
-      const stat = fs.statSync(fullPath);
-      return {
-        name: filename,
-        path: fullPath,
-        isDirectory: stat.isDirectory(),
-        size: stat.size,
-        modifiedAt: stat.mtime.toISOString()
-      };
-    });
-  } catch (err) {
-    console.error('Error reading download dir:', err);
-    return [];
-  }
+  const files = fs.readdirSync(dir);
+  return files.map(filename => {
+    const fullPath = path.join(dir, filename);
+    const stat = fs.lstatSync(fullPath);
+    return {
+      name: filename,
+      path: fullPath,
+      isDirectory: stat.isDirectory(),
+      size: stat.size,
+      modifiedAt: stat.mtime.toISOString()
+    };
+  });
 });
 
 ipcMain.handle('open-folder', (event, itemPath) => {
@@ -2224,19 +2231,32 @@ ipcMain.handle('open-folder', (event, itemPath) => {
 
 ipcMain.handle('delete-file', (event, itemPath) => {
   try {
+    const downloadRoot = path.resolve(db.getSettings().downloadDirectory);
+    if (typeof itemPath !== 'string' || !isPathInside(downloadRoot, itemPath)) {
+      return { ok: false, error: 'Only items inside the downloads directory can be deleted.' };
+    }
     if (fs.existsSync(itemPath)) {
-      const stat = fs.statSync(itemPath);
+      const stat = fs.lstatSync(itemPath);
+      if (stat.isSymbolicLink()) {
+        fs.unlinkSync(itemPath);
+        return { ok: true };
+      }
+      const realPath = fs.realpathSync(itemPath);
+      if (!isPathInside(fs.realpathSync(downloadRoot), realPath)) {
+        return { ok: false, error: 'The selected item resolves outside the downloads directory.' };
+      }
       if (stat.isDirectory()) {
         fs.rmSync(itemPath, { recursive: true, force: true });
       } else {
         fs.unlinkSync(itemPath);
       }
-      return true;
+      return { ok: true };
     }
   } catch (err) {
     console.error('Delete error:', err);
+    return { ok: false, error: err.message || 'Could not delete the selected item.' };
   }
-  return false;
+  return { ok: false, error: 'The selected item no longer exists.' };
 });
 
 // Library: Installed Games IPC
@@ -2255,34 +2275,144 @@ ipcMain.handle('add-installed-game', async () => {
   
   if (!result.canceled && result.filePaths.length > 0) {
     const exePath = result.filePaths[0];
+    if (!isLaunchableGameFile(exePath) || !fs.statSync(exePath).isFile()) {
+      return { ok: false, error: 'Choose a game executable, batch file, or shortcut.' };
+    }
     const name = path.basename(exePath, path.extname(exePath));
-    
-    const game = { name, executablePath: exePath };
-    db.addInstalledGame(game);
-    return { ok: true, game: db.getInstalledGames().find(g => g.executablePath === exePath) };
+    let thumbnail = null;
+    try {
+      thumbnail = await lookupWebIcon(name);
+    } catch (error) {
+      console.warn(`[library] Web artwork lookup failed for "${name}":`, error.message);
+    }
+    const game = db.addInstalledGame({ name, executablePath: exePath, thumbnail });
+    return { ok: true, game };
   }
   return { ok: false };
+});
+
+ipcMain.handle('select-game-executable', async () => {
+  const result = await dialog.showOpenDialog({
+    title: 'Select Game Executable',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Game Launchers', extensions: ['exe', 'bat', 'cmd', 'lnk'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  });
+  if (result.canceled || !result.filePaths.length) return { ok: false };
+
+  const executablePath = result.filePaths[0];
+  if (!isLaunchableGameFile(executablePath) || !fs.statSync(executablePath).isFile()) {
+    return { ok: false, error: 'Choose a game executable, batch file, or shortcut.' };
+  }
+  return {
+    ok: true,
+    executablePath,
+    name: path.basename(executablePath, path.extname(executablePath))
+  };
 });
 
 // Add a game with full metadata (used by "Add Game" form in Library).
 ipcMain.handle('add-game-entry', (event, gameData) => {
   try {
-    if (!gameData || !gameData.name || !gameData.executablePath) {
+    const name = String(gameData?.name || '').trim();
+    const executablePath = String(gameData?.executablePath || '').trim();
+    if (!name || !executablePath) {
       return { ok: false, error: 'Name and executable path are required.' };
     }
+    if (!isLaunchableGameFile(executablePath) || !fs.existsSync(executablePath) || !fs.statSync(executablePath).isFile()) {
+      return { ok: false, error: 'Choose an existing game executable, batch file, or shortcut.' };
+    }
+    const thumbnail = String(gameData?.thumbnail || '').trim();
+    if (thumbnail) {
+      let iconUrl;
+      try {
+        iconUrl = new URL(thumbnail);
+      } catch {
+        return { ok: false, error: 'Game icon must be a valid HTTPS image URL.' };
+      }
+      if (iconUrl.protocol !== 'https:') {
+        return { ok: false, error: 'Game icon must use a secure HTTPS URL.' };
+      }
+    }
     const game = {
-      name: String(gameData.name).trim(),
-      executablePath: String(gameData.executablePath).trim(),
-      size: gameData.size || null,
-      year: gameData.year || null,
-      source: gameData.source || 'Manual',
-      thumbnail: gameData.thumbnail || null
+      name,
+      executablePath,
+      size: String(gameData?.size || '').trim() || null,
+      year: String(gameData?.year || '').trim() || null,
+      source: String(gameData?.source || '').trim() || 'Manual',
+      thumbnail: thumbnail || null
     };
-    db.addInstalledGame(game);
-    return { ok: true, game: db.getInstalledGames().find(g => g.executablePath === game.executablePath) };
+    return { ok: true, game: db.addInstalledGame(game) };
   } catch (err) {
     console.error('add-game-entry error:', err);
     return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('lookup-game-icon', async (event, gameName) => {
+  const name = String(gameName || '').trim();
+  if (!name) return { ok: false, error: 'Enter a game name before searching for artwork.' };
+  if (name.length > 120) return { ok: false, error: 'Game name is too long to search for artwork.' };
+  try {
+    const thumbnail = await lookupWebIcon(name);
+    if (!thumbnail) return { ok: false, error: 'No matching artwork was found in the web catalog.' };
+    return { ok: true, thumbnail };
+  } catch (error) {
+    console.error('[library] web icon lookup failed:', error);
+    return { ok: false, error: error.message || 'Could not search for game artwork.' };
+  }
+});
+
+ipcMain.handle('detect-installed-games', async () => {
+  try {
+    const detected = discoverInstalledGames();
+    const existingPaths = new Set(db.getInstalledGames().map((game) => path.resolve(game.executablePath).toLowerCase()));
+    let added = 0;
+    let iconsMissing = 0;
+    const failures = [];
+    let nextIndex = 0;
+
+    const worker = async () => {
+      while (nextIndex < detected.length) {
+        const game = detected[nextIndex];
+        nextIndex += 1;
+        let thumbnail = db.getInstalledGames().find(
+          (entry) => path.resolve(entry.executablePath).toLowerCase() === path.resolve(game.executablePath).toLowerCase()
+        )?.thumbnail || null;
+        if (!thumbnail) {
+          try {
+            thumbnail = await lookupWebIcon(game.name);
+          } catch (error) {
+            console.warn(`[library-detect] Could not fetch web artwork for "${game.name}":`, error.message);
+            failures.push(game.name);
+          }
+        }
+        if (!thumbnail) iconsMissing += 1;
+        const normalizedPath = path.resolve(game.executablePath).toLowerCase();
+        const wasInstalled = existingPaths.has(normalizedPath);
+        db.addInstalledGame({ ...game, thumbnail });
+        if (!wasInstalled) {
+          added += 1;
+          existingPaths.add(normalizedPath);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, detected.length) }, worker));
+    const games = db.getInstalledGames();
+    return {
+      ok: true,
+      detected: detected.length,
+      added,
+      alreadyInLibrary: detected.length - added,
+      iconsMissing,
+      iconLookupFailures: failures,
+      games
+    };
+  } catch (error) {
+    console.error('[library-detect] Detection failed:', error);
+    return { ok: false, error: error.message || 'Could not detect installed games.' };
   }
 });
 
@@ -2349,17 +2479,21 @@ ipcMain.handle('add-download-to-library', async (event, downloadId) => {
       .slice(0, 80)
       || path.basename(found.absolutePath, path.extname(found.absolutePath));
 
-    db.addInstalledGame({
+    let thumbnail = null;
+    try {
+      thumbnail = await lookupWebIcon(name);
+    } catch (error) {
+      console.warn(`[library] Web artwork lookup failed for "${name}":`, error.message);
+    }
+    const game = db.addInstalledGame({
       name,
       executablePath: found.absolutePath,
       size: String(found.size),
-      source: (history && history.source) || (live && live.meta && live.meta.source) || 'Installed'
+      source: (history && history.source) || (live && live.meta && live.meta.source) || 'Installed',
+      thumbnail
     });
 
-    return {
-      ok: true,
-      game: db.getInstalledGames().find((entry) => entry.executablePath === found.absolutePath)
-    };
+    return { ok: true, game };
   } catch (err) {
     console.error('add-download-to-library error:', err);
     return { ok: false, error: err.message };
@@ -2524,4 +2658,3 @@ ipcMain.handle('search-games', async (event, query, sources) => {
     return [];
   }
 });
-

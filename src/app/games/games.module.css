@@ -235,9 +235,17 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 8px 14px;
-  border-top: 1px solid #1c2233;
+ flex-wrap: wrap;
+ gap: 8px;
+ padding: 8px 14px;
+ border-top: 1px solid #1c2233;
+}
+
+.suggestionActions {
+ display: flex;
+ align-items: center;
+ gap: 4px;
+ margin-left: auto;
 }
 
 .suggestionSource {
@@ -262,6 +270,28 @@
 
 .suggestionMore:hover {
   text-decoration: underline;
+}
+
+.suggestionSearch {
+ min-height: 44px;
+ padding: 0 12px;
+ border: 1px solid rgba(34, 211, 238, 0.35);
+ border-radius: 8px;
+ background: rgba(34, 211, 238, 0.08);
+ color: #67e8f9;
+ font-size: 11px;
+ font-weight: 700;
+ cursor: pointer;
+}
+
+.suggestionSearch:hover {
+ background: rgba(34, 211, 238, 0.14);
+ border-color: #22d3ee;
+}
+
+.suggestionSearch:focus-visible {
+ outline: 2px solid #22d3ee;
+ outline-offset: 2px;
 }
 
 .suggestionFullText {

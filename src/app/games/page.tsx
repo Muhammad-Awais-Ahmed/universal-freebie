@@ -489,16 +489,26 @@ export default function GamesPage() {
         </button>
         <div className={styles.suggestionFooter}>
           <span className={styles.suggestionSource}>SteamUnlocked</span>
-          {showMore && (
+          <div className={styles.suggestionActions}>
+            {showMore && (
+              <button
+                type="button"
+                className={styles.suggestionMore}
+                onClick={() => toggleSuggestionExpanded(game.id)}
+                aria-expanded={expanded}
+              >
+                {expanded ? "Show less" : "More"}
+              </button>
+            )}
             <button
               type="button"
-              className={styles.suggestionMore}
-              onClick={() => toggleSuggestionExpanded(game.id)}
-              aria-expanded={expanded}
+              className={styles.suggestionSearch}
+              onClick={() => handleSuggestionSearch(game)}
+              aria-label={`Search full name and short name for ${game.title}`}
             >
-              {expanded ? "Show less" : "More"}
+              Search
             </button>
-          )}
+          </div>
         </div>
         {expanded && fullText && <p className={styles.suggestionFullText}>{fullText}</p>}
       </article>

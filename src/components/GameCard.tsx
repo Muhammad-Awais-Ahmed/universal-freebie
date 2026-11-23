@@ -3,6 +3,7 @@
 import styles from "./GameCard.module.css";
 import { formatBytes, formatYearDisplay, getSizeTooltip } from "@/utils/formatters";
 import { DownloadCloud, HardDrive, Calendar, Gamepad2 } from "lucide-react";
+import { useState } from "react";
 
 interface Game {
   id: string;
@@ -33,20 +34,23 @@ export default function GameCard({
   const formattedSize = formatBytes(game.size);
   const sizeTooltip = getSizeTooltip(game.size);
   const formattedYear = formatYearDisplay(game.year);
+  const [imageFailed, setImageFailed] = useState(false);
 
   return (
     <div className={styles.card}>
       <div className={styles.imageContainer}>
-        <img
-          src={game.thumbnail}
-          alt={game.title}
-          className={styles.image}
-          onError={(e) => {
-            // Clean gaming controller SVG placeholder (no emoji)
-            (e.target as HTMLImageElement).src =
-              "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='%230e1220'><rect width='100' height='100'/><path d='M30 40h40a15 15 0 0 1 15 15v10a10 10 0 0 1-18 6l-5-7H38l-5 7a10 10 0 0 1-18-6V55a15 15 0 0 1 15-15z' fill='%231e263d'/><circle cx='38' cy='52' r='3' fill='%238b5cf6'/><circle cx='62' cy='52' r='3' fill='%2306b6d4'/></svg>";
-          }}
-        />
+        {game.thumbnail && !imageFailed ? (
+          <img
+            src={game.thumbnail}
+            alt={game.title}
+            className={styles.image}
+            onError={() => setImageFailed(true)}
+          />
+        ) : (
+          <div className={styles.imageFallback} aria-label={`No image available for ${game.title}`}>
+            <Gamepad2 aria-hidden="true" />
+          </div>
+        )}
         <div className={styles.imageOverlay} />
         <div className={`${styles.sourceBadge} ${getSourceClass(game.source)}`}>
           {game.source}
@@ -78,10 +82,12 @@ export default function GameCard({
         </p>
 
         <button
+          type="button"
           className={styles.downloadBtn}
           onClick={() => onDownload(game)}
+          aria-label={`Download ${game.title}`}
         >
-          <DownloadCloud className="w-4 h-4" />
+          <DownloadCloud className="w-4 h-4" aria-hidden="true" />
           Download Game
         </button>
       </div>

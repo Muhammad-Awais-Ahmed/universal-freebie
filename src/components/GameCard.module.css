@@ -31,6 +31,22 @@
   transition: transform 0.4s ease, filter 0.4s ease;
 }
 
+.imageFallback {
+ width: 100%;
+ height: 100%;
+ display: flex;
+ align-items: center;
+ justify-content: center;
+ color: #334155;
+ background: radial-gradient(circle at center, rgba(124,58,237,0.12), transparent 55%), #080a12;
+}
+
+.imageFallback svg {
+ width: 42px;
+ height: 42px;
+ stroke-width: 1.5;
+}
+
 .card:hover .image {
   transform: scale(1.06);
   filter: brightness(1.08);
@@ -175,3 +191,5 @@
 }
 
 .downloadBtn:active { transform: translateY(0); }
+.downloadBtn:focus-visible { outline: 2px solid #22d3ee; outline-offset: 2px; }
+.downloadBtn:disabled { opacity: 0.65; cursor: wait; }

@@ -18,6 +18,7 @@ const { discoverInstalledGames, lookupWebIcon } = require('../src/backend/gameLi
 const { planInstall, runInstaller, installMissingDependencies, cleanupDownloadArtifacts, pruneEmptyStaging, findGameExecutable, STAGING_DIR_NAME, INSTALLED_DIR_NAME } = require('../src/backend/aiInstaller');
 const { AutoInstaller } = require('../src/backend/autoInstall');
 const { getFeaturedGamesMeta } = require('../src/backend/featuredGames');
+const { expandSearchTerms } = require('../src/backend/searchAliases');
 
 let globalDownloader = null;
 let autoInstaller = null;
@@ -2626,14 +2627,21 @@ ipcMain.handle('search-games', async (event, query, sources) => {
       ? sources.reduce((acc, key) => ({ ...acc, [key]: true }), {})
       : (sources || {});
 
+    const searchTerms = expandSearchTerms(query);
+    const termsToSearch = searchTerms.length > 0 ? searchTerms : [String(query || '')];
+
     const promises = [];
-    if (src.archive) promises.push(searchArchiveOrg(query));
-    if (src.fitgirl) promises.push(searchFitGirl(query));
-    if (src.steamunlocked) promises.push(searchSteamUnlocked(query));
+    for (const term of termsToSearch) {
+      if (src.archive) promises.push(searchArchiveOrg(term));
+      if (src.fitgirl) promises.push(searchFitGirl(term));
+      if (src.steamunlocked) promises.push(searchSteamUnlocked(term));
+    }
 
     // If no sources selected, search all
     if (promises.length === 0) {
-      promises.push(searchArchiveOrg(query), searchFitGirl(query), searchSteamUnlocked(query));
+      for (const term of termsToSearch) {
+        promises.push(searchArchiveOrg(term), searchFitGirl(term), searchSteamUnlocked(term));
+      }
     }
 
     const resultsArray = await Promise.all(promises);
@@ -2649,9 +2657,12 @@ ipcMain.handle('search-games', async (event, query, sources) => {
       }
     }
 
-    // Rank by relevance so the best matches come first
+    // Rank by the original query and every short/full-name alias.
     return unique
-      .map(r => ({ ...r, __score: scoreSearchResult(r, query) }))
+      .map(r => ({
+        ...r,
+        __score: Math.max(...termsToSearch.map((term) => scoreSearchResult(r, term)))
+      }))
       .sort((a, b) => b.__score - a.__score)
       .map(({ __score, ...r }) => r);
   } catch (error) {

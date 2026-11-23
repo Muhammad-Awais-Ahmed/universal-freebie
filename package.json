@@ -22,7 +22,7 @@
     "test:library": "node tools/test-game-library.js",
     "test:featured": "node tools/test-featured-games.js",
     "test:aliases": "node tools/test-search-aliases.js",
-    "test:model": "node tools/test-model-fallback-logic.js",
+    "test:model": "node tools/test-model-fallback-logic.js && node tools/test-ai-installer-routing.js",
     "test:update": "node tools/test-update-version-logic.js",
     "render:status": "node tools/render-env.js status",
     "render:unlock": "node tools/render-env.js remove-token --apply"

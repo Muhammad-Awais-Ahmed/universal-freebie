@@ -26,6 +26,7 @@ interface AutoInstallState {
   removed?: string[];
   dependenciesInstalled?: string[];
   dependenciesFailed?: string[];
+  dependencyFraction?: number;
 }
 
 // Phases that mean work is still happening — the row must not auto-dismiss.
@@ -44,7 +45,7 @@ function isActiveInstall(state?: AutoInstallState | null): boolean {
   if (!state) return false;
   if (ACTIVE_PHASES.has(state.phase)) return true;
   // A success that still has pending dependency work is not "done" yet.
-  return state.phase === "dependencies-done" && (state.dependenciesFailed?.length ?? 0) > 0;
+  return false;
 }
 
 const PHASE_LABELS: Record<string, string> = {
@@ -54,6 +55,8 @@ const PHASE_LABELS: Record<string, string> = {
   dependency: "Installing prerequisite",
   "dependency-download": "Downloading prerequisite",
   "dependency-installing": "Setting up prerequisite",
+  "dependency-failed": "Prerequisite failed",
+  "prerequisite-failed": "Prerequisites failed — install stopped",
   "dependencies-done": "Prerequisites ready",
   installing: "Installing game",
   cleaned: "Done — files removed",
@@ -61,6 +64,8 @@ const PHASE_LABELS: Record<string, string> = {
   skipped: "No installer found",
   "awaiting-manual-install": "Start it yourself",
   "cleanup-skipped": "Files kept",
+  "installer-cancelled": "Installer cancelled",
+  cancelled: "Installer cancelled",
   error: "Auto-install failed"
 };
 
@@ -77,6 +82,53 @@ function formatBytes(bytes: number, decimals = 2): string {
 
 function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function isInstallFailure(state?: AutoInstallState | null): boolean {
+  if (!state) return false;
+  return ["error", "skipped", "dependency-failed", "prerequisite-failed", "cleanup-skipped", "installer-cancelled", "cancelled"].includes(state.phase)
+    || (state.phase === "dependencies-done" && (state.dependenciesFailed?.length ?? 0) > 0);
+}
+
+function getInstallProgress(state?: AutoInstallState | null): number {
+  if (!state) return 0;
+  switch (state.phase) {
+    case "planning": return 8;
+    case "installer-found": return 16;
+    case "dependencies": return 24;
+    case "dependency": return 35;
+    case "dependency-download":
+      return 35 + Math.min(1, Math.max(0, state.dependencyFraction ?? 0)) * 25;
+    case "dependency-installing": return 68;
+    case "dependency-failed":
+    case "prerequisite-failed": return 100;
+    case "dependencies-done": return 75;
+    case "installing": return 82;
+    case "awaiting-manual-install": return 90;
+    case "cleaned":
+    case "installed":
+    case "cleanup-skipped": return 100;
+    default: return 100;
+  }
+}
+
+function getAutoFailureCopy(state: AutoInstallState): string {
+  if (state.phase === "dependencies-done" && state.dependenciesFailed?.length) {
+    return `Could not install prerequisite: ${state.dependenciesFailed.join(", ")}. Retry installation or continue with the game installer.`;
+  }
+  if (state.phase === "dependency-failed" || state.phase === "prerequisite-failed") {
+    return state.error || state.message || "A prerequisite failed. Retry installation to try again.";
+  }
+  if (state.phase === "cleanup-skipped") {
+    return "The installer was cancelled or did not finish. Download kept — retry installation or add the game manually.";
+  }
+  if (state.phase === "installer-cancelled" || state.phase === "cancelled") {
+    return "The installer was cancelled. Download kept — retry installation to continue.";
+  }
+  if (state.phase === "skipped") {
+    return state.error || "No installer was found. Retry after checking the download, or add the game manually.";
+  }
+  return state.error ? `${state.error} Download kept — retry installation.` : "Installation failed. Download kept — retry installation.";
 }
 
 function getStatusText(item: DownloadItem, auto?: AutoInstallState | null): string {
@@ -129,6 +181,16 @@ export default function DownloadManager() {
     };
     ipcRenderer.on("downloads-progress", handler);
     ipcRenderer.on("auto-install-progress", installHandler);
+    ipcRenderer.invoke("get-auto-install-state").then((states: AutoInstallState[] | null) => {
+      if (!Array.isArray(states)) return;
+      setAutoInstall((prev) => {
+        const next = { ...prev };
+        for (const state of states) {
+          if (state && state.downloadId) next[state.downloadId] = state;
+        }
+        return next;
+      });
+    }).catch(() => {});
     return () => {
       ipcRenderer.removeListener("downloads-progress", handler);
       ipcRenderer.removeListener("auto-install-progress", installHandler);
@@ -235,6 +297,17 @@ export default function DownloadManager() {
             filtered.map((item) => {
               const auto = autoInstall[item.id];
               const busy = isActiveInstall(auto);
+              const installFailure = isInstallFailure(auto);
+              const installingPhase = busy || (auto?.phase === "dependencies-done" && (auto.dependenciesFailed?.length ?? 0) > 0);
+              const installProgress = auto ? getInstallProgress(auto) : 0;
+              const barProgress = auto && item.status === "completed"
+                ? installProgress
+                : item.progress;
+              const stepText = auto
+                ? (auto.phase === "dependency-download" && typeof auto.dependencyFraction === "number"
+                    ? `${auto.message || "Downloading prerequisite"} ${Math.round(auto.dependencyFraction * 100)}%`
+                    : auto.message || PHASE_LABELS[auto.phase] || auto.phase)
+                : (item.status === "completed" ? "Download complete" : `${item.progress}% downloaded`);
               return (
               <div key={item.id} className={styles.downloadItem}>
                 <div className={styles.itemHeader}>
@@ -246,23 +319,29 @@ export default function DownloadManager() {
                   </div>
                 </div>
 
-                <div className={styles.progressContainer}>
-                  <div
-                    className={`${styles.progressBar} ${
-                      auto?.phase === "error"
-                        ? styles.progressBarError
-                        : busy
-                        ? styles.progressBarInstalling
-                        : styles[`progressBar${capitalize(item.status)}`] || ""
-                    }`}
-                    style={{ width: `${item.progress}%` }}
-                  />
+                <div className={styles.progressWrap}>
+                  <div className={styles.progressContainer}>
+                    <div
+                      className={`${styles.progressBar} ${
+                        installFailure
+                          ? styles.progressBarError
+                          : installingPhase
+                          ? styles.progressBarInstalling
+                          : styles[`progressBar${capitalize(item.status)}`] || ""
+                      }`}
+                      style={{ width: `${Math.min(100, Math.max(0, barProgress))}%` }}
+                    />
+                  </div>
+                  <div className={styles.progressStep} title={stepText}>
+                    <span>{auto ? (busy ? "Installing" : "Install step") : "Download"}</span>
+                    <strong>{stepText}</strong>
+                  </div>
                 </div>
 
                 {auto && (
                   <div
                     className={`${styles.autoInstallRow} ${
-                      auto.phase === "error" ? styles.autoInstallRowError : ""
+                      installFailure ? styles.autoInstallRowError : ""
                     }`}
                   >
                     <span className={styles.autoInstallIcon}>
@@ -273,7 +352,7 @@ export default function DownloadManager() {
                       )}
                     </span>
                     <span className={styles.autoInstallText} title={auto.error || auto.message}>
-                      {auto.error || auto.message || PHASE_LABELS[auto.phase] || auto.phase}
+                      {installFailure ? getAutoFailureCopy(auto) : (auto.error || auto.message || PHASE_LABELS[auto.phase] || auto.phase)}
                     </span>
                     {auto.removed && auto.removed.length > 0 && (
                       <span className={styles.autoInstallMeta}>
@@ -327,7 +406,7 @@ export default function DownloadManager() {
                         <RotateCcw className="w-3 h-3" /> Resume
                       </button>
                     )}
-                    {item.status === "completed" && !auto && (
+                    {item.status === "completed" && (!auto || installFailure) && (
                       <button
                         className={styles.retryBtn}
                         title="Let the AI install this game"

@@ -7,6 +7,9 @@ const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'uf-ai-lib-'));
 const archivePath = path.join(tempRoot, 'Game.zip');
 fs.writeFileSync(archivePath, 'not-a-real-archive');
 
+let dependencyOutcome = { installed: [], failed: [] };
+let dependencyOk = true;
+
 const fakeAiInstaller = {
   planInstall: async () => ({
     installerPath: path.join(tempRoot, 'GameLauncher.exe'),
@@ -14,8 +17,8 @@ const fakeAiInstaller = {
     confidence: 0.98,
     reason: 'Fake installer match for regression test',
   }),
-  runInstaller: () => ({ ok: true }),
-  installMissingDependencies: async () => ({ installed: [], failed: [] }),
+  runInstaller: () => ({ ok: true, result: Promise.resolve({ ok: true, exitCode: 0, signal: null }) }),
+  installMissingDependencies: async () => Object.assign({ ok: dependencyOk }, dependencyOutcome),
   cleanupDownloadArtifacts: () => ({ removed: [], skipped: [] }),
   pruneEmptyStaging: () => {},
   findGameExecutable: (root) => ({
@@ -71,6 +74,56 @@ Module._load = originalLoad;
     process.exit(1);
   }
 
-  console.log('PASS: auto-install registers the installed game in the library');
+  let launchCount = 0;
+  dependencyOk = false;
+  dependencyOutcome = {
+    ok: false,
+    error: 'One prerequisite could not be installed.',
+    installed: [],
+    failed: [{ id: 'vcredist_x64', label: 'Visual C++ 2015-2022 Redistributable (x64)', ok: false }],
+  };
+  fakeAiInstaller.runInstaller = () => {
+    launchCount++;
+    return { ok: true, result: Promise.resolve({ ok: true, exitCode: 0, signal: null }) };
+  };
+
+  const prerequisiteBlocker = new AutoInstaller(() => ({
+    autoInstallEnabled: true,
+    autoInstallDependencies: true,
+    autoLaunchInstaller: true,
+    autoDeleteAfterInstall: false,
+    downloadDirectory: tempRoot,
+  }));
+  await prerequisiteBlocker.handleCompleted({
+    id: 'dl-prereq-failed',
+    filename: 'Blocked.zip',
+    filePath: archivePath,
+    source: 'Test Source',
+  }, { force: true });
+
+  const prereqState = prerequisiteBlocker.getState('dl-prereq-failed');
+  if (launchCount !== 0) {
+    console.log('FAIL: game installer launched after a prerequisite failure');
+    process.exit(1);
+  }
+  if (!prereqState || prereqState.phase !== 'prerequisite-failed' || !prereqState.dependenciesFailed?.length) {
+    console.log('FAIL: prerequisite failure was not visible in persisted install state');
+    process.exit(1);
+  }
+
+  let persisted;
+  const restartTest = new AutoInstaller(() => ({ downloadDirectory: tempRoot }), (states) => { persisted = states; });
+  restartTest.restoreStates({ 'dl-interrupted': {
+    downloadId: 'dl-interrupted',
+    phase: 'installing',
+    filename: 'Interrupted.zip',
+  } });
+  const interrupted = restartTest.getState('dl-interrupted');
+  if (!interrupted || interrupted.phase !== 'interrupted' || !persisted?.length) {
+    console.log('FAIL: active install state was not reconciled and persisted on restart');
+    process.exit(1);
+  }
+
+  console.log('PASS: auto-install library registration, prerequisite blocking, and restart reconciliation');
   process.exit(0);
 })();

@@ -7,9 +7,12 @@ const NIM_ENDPOINT = process.env.NVIDIA_NIM_BASE_URL || 'https://integrate.api.n
 // The hosted AI service is public: no key, no token, no account. Access is
 // protected by the backend's per-IP rate limit rather than by a shared secret,
 // because a desktop app could never keep one secret anyway.
-const AI_PROXY_URL = process.env.UNIVERSAL_FREEBIE_AI_URL || 'https://universal-freebie-ai.onrender.com/api/ai/install-plan';
-// Only used for the direct-to-NIM fallback, which the app never takes while the
-// hosted service is reachable. Match the hosted service's first choice.
+const configuredAiUrl = (process.env.UNIVERSAL_FREEBIE_AI_URL || '').trim();
+const AI_PROXY_URL = /^direct$/i.test(configuredAiUrl)
+  ? ''
+  : configuredAiUrl || 'https://universal-freebie-ai.onrender.com/api/ai/install-plan';
+// Used only in explicit local direct mode; the hosted service remains the
+// default so provider credentials stay server-side.
 const NIM_MODEL = process.env.NVIDIA_NIM_MODEL || 'google/gemma-3-12b-it';
 const MAX_FILES = 250;
 
@@ -25,6 +28,15 @@ const AUX_EXTENSIONS = new Set(['.bin', '.dat', '.nupkg', '.cab', '.msi']);
 
 function getApiKey() {
   return (process.env.NVIDIA_NIM_API_KEY || process.env.NIM_API_KEY || '').trim();
+}
+
+function isLoopbackEndpoint(endpoint) {
+  try {
+    const hostname = new URL(endpoint).hostname.toLowerCase();
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+  } catch (error) {
+    return false;
+  }
 }
 
 function resolveInside(root, candidate) {
@@ -56,10 +68,16 @@ function extractZip(archivePath, downloadDirectory, gameTitle) {
     ], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
     let errorOutput = '';
     child.stderr.on('data', (chunk) => { errorOutput += chunk.toString(); });
-    child.once('error', reject);
+    child.once('error', (error) => {
+      try { fs.rmSync(targetDirectory, { recursive: true, force: true }); } catch (e) {}
+      reject(error);
+    });
     child.once('close', (code) => {
       if (code === 0) resolve(targetDirectory);
-      else reject(new Error(errorOutput.trim() || `Archive extraction failed with exit code ${code}.`));
+      else {
+        try { fs.rmSync(targetDirectory, { recursive: true, force: true }); } catch (e) {}
+        reject(new Error(errorOutput.trim() || `Archive extraction failed with exit code ${code}.`));
+      }
     });
   });
 }
@@ -288,10 +306,20 @@ function extractPlan(payload) {
   return parseJson(payload && payload.choices && payload.choices[0] && payload.choices[0].message.content);
 }
 
+function cleanupExtractedStaging(stagingDirectory) {
+  if (!stagingDirectory) return false;
+  const resolved = path.resolve(stagingDirectory);
+  const stagingRoot = path.resolve(path.dirname(path.dirname(resolved)));
+  // This helper is only called for staging we created. Keep the archive and
+  // remove only the staging folder itself.
+  if (path.basename(path.dirname(resolved)) !== STAGING_DIR_NAME) return false;
+  try { fs.rmSync(resolved, { recursive: true, force: true }); return true; } catch (e) { return false; }
+}
+
 async function planInstall({ filePath, gameTitle, source }) {
   const apiKey = getApiKey();
-  if (!AI_PROXY_URL && !apiKey) {
-    return { error: 'The AI service is unreachable. Check your connection and try again.' };
+  if (!AI_PROXY_URL && !apiKey && !isLoopbackEndpoint(NIM_ENDPOINT)) {
+    return { error: 'A provider API key is required unless the configured endpoint is local.' };
   }
   if (!fs.existsSync(filePath)) return { error: 'The downloaded file is no longer available.' };
 
@@ -311,27 +339,37 @@ async function planInstall({ filePath, gameTitle, source }) {
     selectedFile = filePath;
   }
 
-  const files = selectedFile
-    ? [{
-        path: path.basename(selectedFile),
-        extension: path.extname(selectedFile).toLowerCase(),
-        size: fs.statSync(selectedFile).size
-      }]
-    : listFiles(scanRoot);
-  if (!files.length) return { error: 'No files were found to inspect.' };
+  let files;
+  try {
+    files = selectedFile
+      ? [{
+          path: path.basename(selectedFile),
+          extension: path.extname(selectedFile).toLowerCase(),
+          size: fs.statSync(selectedFile).size
+        }]
+      : listFiles(scanRoot);
+  } catch (error) {
+    cleanupExtractedStaging(stagingDirectory);
+    return { error: `Extracted files could not be inspected: ${error.message}` };
+  }
+  if (!files.length) {
+    cleanupExtractedStaging(stagingDirectory);
+    return { error: 'No files were found to inspect.' };
+  }
 
   const requestBody = {
     gameTitle: gameTitle || 'Unknown game',
     source: source || 'Unknown',
     files
   };
-  const response = await fetch(AI_PROXY_URL || NIM_ENDPOINT, {
+  let response;
+  try {
+    response = await fetch(AI_PROXY_URL || NIM_ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      // Only the direct-NIM fallback path needs a key; the hosted service
-      // already holds one server-side and is called without credentials.
-      ...(!AI_PROXY_URL ? { Authorization: `Bearer ${apiKey}` } : {})
+      // Keep direct credentials local; loopback routers can be unauthenticated.
+      ...(!AI_PROXY_URL && apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
     },
     body: JSON.stringify(AI_PROXY_URL ? requestBody : {
       model: NIM_MODEL,
@@ -349,9 +387,14 @@ async function planInstall({ filePath, gameTitle, source }) {
         }
       ]
     })
-  });
+    });
+  } catch (error) {
+    cleanupExtractedStaging(stagingDirectory);
+    return { error: `AI planning request failed: ${error.message}` };
+  }
 
   if (!response.ok) {
+    cleanupExtractedStaging(stagingDirectory);
     const detail = await response.text();
     if (response.status === 401 || response.status === 403) {
       throw new Error(
@@ -361,11 +404,19 @@ async function planInstall({ filePath, gameTitle, source }) {
     }
     throw new Error(`AI request failed (${response.status}): ${detail.slice(0, 240)}`);
   }
-  const payload = await response.json();
-  const result = extractPlan(payload);
+  let payload;
+  let result;
+  try {
+    payload = await response.json();
+    result = extractPlan(payload);
+  } catch (error) {
+    cleanupExtractedStaging(stagingDirectory);
+    return { error: `AI response could not be parsed safely: ${error.message}` };
+  }
   const installerPath = typeof result.installerPath === 'string' ? result.installerPath : '';
   const installer = installerPath ? resolveInside(scanRoot, installerPath) : null;
   if (!installer || !fs.existsSync(installer) || !['.exe', '.msi'].includes(path.extname(installer).toLowerCase())) {
+    cleanupExtractedStaging(stagingDirectory);
     return { error: result.reason || 'AI could not identify a safe Windows installer in this download.' };
   }
 
@@ -376,19 +427,55 @@ async function planInstall({ filePath, gameTitle, source }) {
     stagingDirectory,
     confidence: Math.max(0, Math.min(1, Number(result.confidence) || 0)),
     reason: String(result.reason || 'Installer candidate detected.'),
-    model: NIM_MODEL
+    model: payload.model || NIM_MODEL
   };
 }
 
 function runInstaller(installerPath, downloadDirectory) {
   const installer = resolveInside(downloadDirectory, path.relative(downloadDirectory, installerPath));
   if (!installer || !fs.existsSync(installer)) return { ok: false, error: 'Installer was not found.' };
+
   const extension = path.extname(installer).toLowerCase();
   const command = extension === '.msi' ? 'msiexec.exe' : installer;
   const args = extension === '.msi' ? ['/i', installer] : [];
-  const child = spawn(command, args, { cwd: path.dirname(installer), detached: true, stdio: 'ignore', windowsHide: false });
-  child.unref();
-  return { ok: true };
+
+  let child;
+  try {
+    child = spawn(command, args, {
+      cwd: path.dirname(installer),
+      detached: false,
+      stdio: ['ignore', 'ignore', 'ignore'],
+      windowsHide: false,
+    });
+  } catch (error) {
+    return { ok: false, error: error.message || 'Installer could not be started.' };
+  }
+
+  const result = new Promise((resolve) => {
+    let settled = false;
+    const finish = (outcome) => {
+      if (settled) return;
+      settled = true;
+      resolve(outcome);
+    };
+
+    child.once('error', (error) => finish({
+      ok: false,
+      exitCode: null,
+      signal: null,
+      error: error.message || 'Installer could not be started.',
+    }));
+    child.once('close', (code, signal) => finish({
+      ok: code === 0 && !signal,
+      exitCode: typeof code === 'number' ? code : null,
+      signal: signal || null,
+      error: code === 0 && !signal ? null : signal
+        ? `Installer was terminated by signal ${signal}.`
+        : `Installer exited with code ${code}.`,
+    }));
+  });
+
+  return { ok: true, process: child, result, installerPath: installer };
 }
 
 // ---------------------------------------------------------------------------

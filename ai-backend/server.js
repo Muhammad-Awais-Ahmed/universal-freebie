@@ -11,7 +11,8 @@
  *
  * Environment:
  *   NVIDIA_NIM_API_KEY   (required) NVIDIA NIM API key
- *   NVIDIA_NIM_MODEL     (optional) default meta/llama-3.1-8b-instruct
+ *   NVIDIA_NIM_MODEL     (optional) default google/gemma-3-12b-it
+ *   NVIDIA_NIM_FALLBACK_MODELS (optional) comma-separated model IDs, max 8 fallback routes
  *   AI_CLIENT_TOKEN      (optional) shared token the app must send. Leave unset
  *                        to keep the service open, which is the default.
  *   AI_REQUEST_LIMIT     (optional) requests per IP per window, default 30
@@ -28,22 +29,11 @@ const NIM_ENDPOINT =
 const NIM_KEY = (process.env.NVIDIA_NIM_API_KEY || '').trim();
 const CLIENT_TOKEN = (process.env.AI_CLIENT_TOKEN || '').trim();
 
-// NVIDIA retires hosted models without warning; a retired id answers 410 Gone
-// and the whole feature would look broken. The configured model is tried
-// first, then these in order until one answers. The first model that works is
-// remembered so the fallback list is only walked on the failure that matters.
-//
-// The default is kept as the first entry rather than being a bare fallback so
-// the health endpoint keeps reporting whatever the operator configured. If that
-// id is retired, the chain simply moves on to the next one.
-const MODEL_FALLBACKS = [
-  process.env.NVIDIA_NIM_MODEL || 'google/gemma-3-12b-it',
-  'google/gemma-3-4b-it',
-  'mistralai/mistral-7b-instruct-v0.3',
-  'nvidia/mistral-nemo-12b-instruct',
-  'ibm/granite-3.0-8b-instruct',
-];
-let preferredModel = MODEL_FALLBACKS[0];
+// NVIDIA retires hosted models without warning. Try the configured model first,
+// followed by up to eight configured fallbacks; remember the first working route.
+const { resolveModelRoutes } = require('./modelRouting');
+const { primary: CONFIGURED_MODEL, models: MODEL_FALLBACKS } = resolveModelRoutes();
+let preferredModel = CONFIGURED_MODEL;
 
 // Per-IP rate limit is the real protection. A shared token cannot protect a
 // desktop app, because any app-shipped token is public the moment it ships.

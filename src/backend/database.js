@@ -29,7 +29,8 @@ class Database {
         autoDeleteAfterInstall: false
       },
       downloadHistory: [],
-      installedGames: []
+      installedGames: [],
+      autoInstallStates: {}
     };
   }
 
@@ -99,6 +100,18 @@ class Database {
       });
       this._saveData();
     }
+  }
+
+  getAutoInstallStates() {
+    if (!this.data.autoInstallStates || typeof this.data.autoInstallStates !== 'object') {
+      this.data.autoInstallStates = {};
+    }
+    return this.data.autoInstallStates;
+  }
+
+  setAutoInstallStates(states) {
+    this.data.autoInstallStates = states && typeof states === 'object' ? states : {};
+    this._saveData();
   }
 
   updateDownloadHistory(id, patch) {

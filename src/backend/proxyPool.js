@@ -103,6 +103,7 @@ function getStatus() {
 async function fetchRawCandidates() {
   const seen = new Set();
   const candidates = [];
+  let successfulSources = 0;
 
   const fetchPromises = PROXY_SOURCES.map(async (url) => {
     try {
@@ -111,6 +112,7 @@ async function fetchRawCandidates() {
         responseType: 'text',
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
       });
+      successfulSources++;
       const lines = String(res.data).split(/\r?\n/);
       for (const line of lines) {
         const t = line.trim();
@@ -137,6 +139,12 @@ async function fetchRawCandidates() {
   });
 
   await Promise.allSettled(fetchPromises);
+  if (successfulSources === 0) {
+    throw new Error('All proxy list sources failed. The verified pool was retained.');
+  }
+  if (candidates.length === 0) {
+    throw new Error('Proxy list sources returned no candidates. The verified pool was retained.');
+  }
 
   // Shuffle candidates to avoid clustering by single repository
   for (let i = candidates.length - 1; i > 0; i--) {
@@ -267,13 +275,17 @@ async function refreshProxyPool() {
   try {
     const candidates = await fetchRawCandidates();
     const result = await testUntilTarget(candidates);
-    state.proxies = result.working;
     state.stats.staleRemoved += result.staleCount;
     state.cursor = 0;
     state.lastUpdated = Date.now();
     state.lastValidated = Date.now();
-    if (state.proxies.length < MIN_WORKING_PROXIES) {
-      state.error = `Only ${state.proxies.length} verified proxies were available after testing all candidates.`;
+    if (!result.working.length && state.proxies.length) {
+      state.error = 'No verified proxies passed refresh; the previous verified pool was retained.';
+    } else {
+      state.proxies = result.working;
+      if (state.proxies.length < MIN_WORKING_PROXIES) {
+        state.error = `Only ${state.proxies.length} verified proxies were available after testing all candidates.`;
+      }
     }
   } catch (err) {
     state.error = err.message;

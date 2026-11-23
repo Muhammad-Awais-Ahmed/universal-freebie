@@ -50,7 +50,8 @@ its existing logic:
 | Variable               | Required | Default                        | Description                                  |
 | ---------------------- | -------- | ------------------------------ | -------------------------------------------- |
 | `NVIDIA_NIM_API_KEY`   | yes      | —                              | NVIDIA NIM API key (never exposed to client) |
-| `NVIDIA_NIM_MODEL`     | no       | `google/gemma-3-12b-it`        | First model tried (see fallback below)       |
+| `NVIDIA_NIM_MODEL`     | no       | `google/gemma-3-12b-it`        | First model tried; can be a provider-supported alias |
+| `NVIDIA_NIM_FALLBACK_MODELS` | no | built-in list | Comma-separated fallback IDs, capped at 8 plus the primary model |
 | `NVIDIA_NIM_BASE_URL`  | no       | NIM chat completions endpoint   | Override endpoint if needed                   |
 | `AI_CLIENT_TOKEN`      | no       | —                              | If set, clients must send `X-App-Token`       |
 | `AI_REQUEST_LIMIT`     | no       | `30`                           | Requests per IP per window                    |
@@ -61,9 +62,12 @@ its existing logic:
 
 NVIDIA retires hosted models without warning, and a retired id answers
 `410 Gone`. Rather than let that silently break installer detection, the
-service tries `NVIDIA_NIM_MODEL` first and then walks a built-in fallback list
-until one answers. The winner is remembered for the life of the process, so a
-retirement costs one extra request rather than one per request.
+service tries `NVIDIA_NIM_MODEL` first and then walks the configured fallback list
+until one answers. Set `NVIDIA_NIM_FALLBACK_MODELS` to a comma-separated list to
+replace the defaults (at most eight fallbacks are used). The winner is remembered
+for the life of the process, so a retirement costs one extra request rather than
+one per request. A custom model such as `combo 21559-m` can be placed in either
+variable only when the configured API endpoint recognizes that identifier.
 
 Only `404`, `410`, and `503` advance the chain. Everything else, such as a bad
 key or a rate limit, is surfaced immediately, so a real problem is never
@@ -127,37 +131,28 @@ Steps:
 
 The app already targets this URL by default and needs **no key and no token**.
 To point it elsewhere, set `UNIVERSAL_FREEBIE_AI_URL` before launching the
-desktop app.
+desktop app. For local development only, set `UNIVERSAL_FREEBIE_AI_URL=direct`
+to call the configured OpenAI-compatible endpoint directly; the selected provider
+must support the configured model ID. For `combo 21559-m`, for example, set the
+provider's chat-completions URL and `NVIDIA_NIM_MODEL=21559-M` in the local environment (the local 9router model
+list reports this exact ID with owner `combo`). A key is not required for the
+loopback router. In a Windows development shell, launch the app with:
 
-## Model selection and retirement
-
-NVIDIA retires hosted models without warning, and a retired id answers
-`410 Gone`. Rather than let that silently break installer detection, the
-service tries `NVIDIA_NIM_MODEL` first and then walks a built-in fallback list
-until one answers. The winner is remembered for the life of the process, so a
-retirement costs one extra request rather than one per request.
-
-Only `404`, `410`, and `503` advance the chain. Everything else, such as a bad
-key or a rate limit, is surfaced immediately so a real problem is never masked
-by retries.
-
-`GET /api/health` reports both the configured model and the one currently
-answering:
-
-```json
-{
-  "ok": true,
-  "aiConfigured": true,
-  "model": "google/gemma-3-12b-it",
-  "configuredModel": "google/gemma-3-12b-it",
-  "clientTokenRequired": false
-}
+```powershell
+$env:UNIVERSAL_FREEBIE_AI_URL = 'direct'
+$env:NVIDIA_NIM_BASE_URL = 'http://127.0.0.1:20128/v1/chat/completions'
+$env:NVIDIA_NIM_MODEL = '21559-M'
+npm run electron:dev
 ```
+
+For hosted use, set provider/model variables on the service instead. Never put a
+key in source control or a packaged app.
 
 ## Security notes
 
-- The NVIDIA key is only read from the server environment and is never shipped
-  to or visible in the desktop app.
+- The NVIDIA key is only read from the AI service environment and is never shipped
+  to or visible in the desktop app. Local direct mode may omit a key only for a
+  loopback endpoint; model requests do not route through the download proxy pool.
 - Requests are rate limited per IP, which is what protects a public service.
 - A shared client token is not a real boundary for a desktop app: any token
   shipped inside the app is public the moment the app ships. `AI_CLIENT_TOKEN`

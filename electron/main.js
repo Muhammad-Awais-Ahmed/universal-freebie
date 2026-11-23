@@ -282,7 +282,11 @@ function createWindow() {
 
   // Any completed download kicks off the AI auto-install pipeline when the
   // feature is enabled in Settings.
-  autoInstaller = new AutoInstaller(() => db.getSettings());
+  autoInstaller = new AutoInstaller(
+    () => db.getSettings(),
+    (states) => db.setAutoInstallStates(Object.fromEntries(states.map((state) => [state.downloadId, state])))
+  );
+  autoInstaller.restoreStates(db.getAutoInstallStates());
   autoInstaller.on('progress', (state) => {
     sendToAllWindows('auto-install-progress', state);
   });
@@ -2544,9 +2548,12 @@ ipcMain.handle('ai-install-plan', async (event, downloadId) => {
   }
 });
 
-ipcMain.handle('ai-install-run', (event, installerPath) => {
+ipcMain.handle('ai-install-run', async (event, installerPath) => {
   try {
-    return runInstaller(installerPath, db.getSettings().downloadDirectory);
+    const launched = runInstaller(installerPath, db.getSettings().downloadDirectory);
+    if (!launched.ok) return launched;
+    const outcome = await launched.result;
+    return outcome;
   } catch (error) {
     console.error('AI installer launch error:', error);
     return { ok: false, error: error.message || 'Installer could not be started.' };

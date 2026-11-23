@@ -15,18 +15,8 @@ const path = require('path');
 const SERVER_PATH = path.resolve(__dirname, '..', 'ai-backend', 'server.js');
 const source = fs.readFileSync(SERVER_PATH, 'utf8');
 
-// Pull the constants and helper straight out of the source so the test cannot
-// drift from the implementation. The first entry is an expression, not a plain
-// string, so it is evaluated rather than regex-matched.
-function extractList(name) {
-  const re = new RegExp(`^const ${name}\\s*=\\s*\\[([\\s\\S]*?)\\];`, 'm');
-  const match = source.match(re);
-  if (!match) throw new Error(`Could not find const ${name} in server.js`);
-  return Function(`return [${match[1]}];`)()
-    .filter((v) => typeof v === 'string' && v.length > 0);
-}
-
-const fallbacks = extractList('MODEL_FALLBACKS');
+const { resolveModelRoutes, MAX_MODEL_ROUTES } = require('../ai-backend/modelRouting');
+const fallbacks = resolveModelRoutes({}).models;
 
 const helperSource = source.slice(
   source.indexOf('async function requestNim'),
@@ -46,12 +36,19 @@ function check(label, condition) {
   }
 }
 
-// 1. Every fallback must be a currently listed NVIDIA model id.
+// 1. The configured route list must use a supported, non-retired model ID.
 const RETIRED = 'meta/llama-3.1-8b-instruct';
 check('configured default is no longer the retired model', !source.includes(`|| '${RETIRED}'`));
 check('fallback list is not the retired model', !fallbacks.includes(RETIRED));
 check('fallback list is non-empty', fallbacks.length > 0);
 check('fallback list has no duplicates', new Set(fallbacks).size === fallbacks.length);
+const comboRoutes = resolveModelRoutes({
+  NVIDIA_NIM_MODEL: '21559-M',
+  NVIDIA_NIM_FALLBACK_MODELS: 'route-b,route-c,route-d,route-e,route-f,route-g,route-h,route-i,route-j'
+});
+check('custom model combo is the primary route', comboRoutes.primary === '21559-M');
+check('configured model routing is capped at nine distinct routes', comboRoutes.models.length === MAX_MODEL_ROUTES);
+check('configured routes stay unique', new Set(comboRoutes.models).size === comboRoutes.models.length);
 
 // 2. The chain must treat 410 as "try the next model".
 check('treats 410 as a candidate failure', /status === 410/.test(helperSource));
@@ -64,7 +61,7 @@ check('remembers the working model', /preferredModel = model/.test(helperSource)
 check('starts from the configured model first', /\[preferredModel, \.\.\.MODEL_FALLBACKS\]/.test(helperSource));
 
 // 4. Exercise the real helper with a stubbed fetch: first model 410s, second works.
-async function runChain(behaviour) {
+async function runChain(behaviour, models = fallbacks) {
   const requested = [];
   const sandboxFetch = async (url, options) => {
     const model = JSON.parse(options.body).model;
@@ -87,7 +84,7 @@ async function runChain(behaviour) {
   console.log = () => {};
   console.error = () => {};
 
-  const requestNim = fn(sandboxFetch, 'https://example.invalid', 'test-key', fallbacks, 'sys', fallbacks[0]);
+  const requestNim = fn(sandboxFetch, 'https://example.invalid', 'test-key', models, 'sys', models[0]);
   const result = await requestNim({ gameTitle: 'G', source: 'T', files: [] });
 
   console.log = realLog;
@@ -106,6 +103,13 @@ function gemmaOk(model) {
 }
 
 (async () => {
+  // A custom combo model is sent first when configured, then falls back normally.
+  {
+    const { requested, result } = await runChain((model) => gemmaOk(model), comboRoutes.models);
+    check('combo route is requested first', requested[0] === '21559-M');
+    check('combo route can return success', result.ok === true && result.modelUsed === '21559-M');
+  }
+
   // Case A: first model 410s, next one works.
   {
     const { requested, result } = await runChain((model) => {

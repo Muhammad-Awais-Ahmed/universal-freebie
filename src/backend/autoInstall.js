@@ -27,12 +27,6 @@ const {
   INSTALLED_DIR_NAME,
 } = require('./aiInstaller');
 
-// How long to wait for the game's own installer before giving up and keeping
-// the downloaded files. Installers that spawn a child and exit immediately
-// (very common) are handled by the "process tree is gone" check.
-const INSTALLER_EXIT_GRACE_MS = 5 * 60 * 1000;
-const MIN_WATCH_MS = 20 * 1000;
-const POLL_INTERVAL_MS = 3000;
 
 function safeName(value) {
   return String(value || 'game')
@@ -42,9 +36,10 @@ function safeName(value) {
 }
 
 class AutoInstaller extends EventEmitter {
-  constructor(getSettings) {
+  constructor(getSettings, persistStates = null) {
     super();
     this.getSettings = getSettings;
+    this.persistStates = typeof persistStates === 'function' ? persistStates : null;
     this.active = new Map();
     this.state = new Map();
     // Set by the main process. Receives { name, executablePath, size, source }
@@ -65,8 +60,36 @@ class AutoInstaller extends EventEmitter {
       updatedAt: Date.now(),
     });
     this.state.set(downloadId, next);
+    if (this.persistStates) {
+      try { this.persistStates(this.getAllStates()); } catch (e) {}
+    }
     this.emit('progress', next);
     return next;
+  }
+
+  restoreStates(savedStates) {
+    if (!savedStates) return;
+    const entries = Array.isArray(savedStates)
+      ? savedStates
+      : Object.values(savedStates);
+    for (const state of entries) {
+      if (!state || !state.downloadId) continue;
+      const activePhases = new Set([
+        'planning', 'installer-found', 'dependencies', 'dependency',
+        'dependency-download', 'dependency-installing', 'dependencies-done', 'installing'
+      ]);
+      const restored = activePhases.has(state.phase)
+        ? Object.assign({}, state, {
+            phase: 'interrupted',
+            message: 'Install state could not resume after app restart. Review or run it again.',
+            error: 'The app restarted before setup completed.',
+          })
+        : Object.assign({}, state);
+      this.state.set(state.downloadId, restored);
+    }
+    if (this.persistStates) {
+      try { this.persistStates(this.getAllStates()); } catch (e) {}
+    }
   }
 
   getState(downloadId) {
@@ -79,6 +102,9 @@ class AutoInstaller extends EventEmitter {
 
   clearState(downloadId) {
     this.state.delete(downloadId);
+    if (this.persistStates) {
+      try { this.persistStates(this.getAllStates()); } catch (e) {}
+    }
   }
 
   /**
@@ -180,14 +206,26 @@ class AutoInstaller extends EventEmitter {
         },
       });
 
+      const failedLabels = (dependencies.failed || []).map((entry) => entry.label);
       this._publish(item.id, {
         phase: 'dependencies-done',
-        dependenciesInstalled: dependencies.installed.map((entry) => entry.label),
-        dependenciesFailed: dependencies.failed.map((entry) => entry.label),
-        message: dependencies.installed.length
-          ? `Installed ${dependencies.installed.length} prerequisite(s).`
+        dependenciesInstalled: (dependencies.installed || []).map((entry) => entry.label),
+        dependenciesFailed: failedLabels,
+        message: (dependencies.installed || []).length
+          ? `Installed ${(dependencies.installed || []).length} prerequisite(s).`
           : 'No missing prerequisites.',
       });
+
+      if (failedLabels.length || dependencies.ok === false) {
+        this._publish(item.id, {
+          phase: 'prerequisite-failed',
+          dependenciesInstalled: (dependencies.installed || []).map((entry) => entry.label),
+          dependenciesFailed: failedLabels,
+          error: dependencies.error || 'One or more prerequisite installers failed.',
+          message: 'Prerequisite failure stopped the game installer. The downloaded archive was kept.',
+        });
+        return;
+      }
     }
 
     // ---- 3. Launch the game installer ----------------------------------
@@ -214,7 +252,10 @@ class AutoInstaller extends EventEmitter {
       return;
     }
 
-    const finished = await this._waitForInstaller(plan.installerPath, item.id);
+    const outcome = await this._waitForInstaller(launched, item.id);
+    const finished = typeof outcome === 'boolean'
+      ? outcome
+      : outcome && outcome.ok === true;
 
     if (settings.autoDeleteAfterInstall === true) {
       if (finished) {
@@ -246,9 +287,19 @@ class AutoInstaller extends EventEmitter {
         return;
       }
 
+      const exitCode = typeof outcome === 'object' ? outcome.exitCode : null;
+      const signal = typeof outcome === 'object' ? outcome.signal : null;
+      const cancelled = signal || exitCode === 1223 || exitCode === 1602 || exitCode === 1604;
       this._publish(item.id, {
-        phase: 'cleanup-skipped',
-        message: 'The installer is still running, so the downloaded files were kept.',
+        phase: cancelled ? 'installer-cancelled' : 'cleanup-skipped',
+        error: cancelled
+          ? 'The installer was cancelled. The downloaded files were kept.'
+          : (typeof outcome === 'object' && outcome.error ? outcome.error : null),
+        exitCode,
+        signal,
+        message: cancelled
+          ? 'Retry installation to continue.'
+          : 'The installer did not finish successfully, so the downloaded files were kept.',
       });
       return;
     }
@@ -324,54 +375,34 @@ class AutoInstaller extends EventEmitter {
     return null;
   }
 
-  /**
-   * Resolves true once the installer is no longer running.
-   *
-   * `runInstaller` detaches the child, so instead of tracking a PID we watch
-   * whether any process still holds the installer executable open. That also
-   * correctly handles installers that relaunch themselves elevated.
-   */
-  _waitForInstaller(installerPath, downloadId) {
-    return new Promise((resolve) => {
-      const startedAt = Date.now();
-
-      const finish = (value) => {
-        clearInterval(timer);
-        resolve(value);
-      };
-
-      const timer = setInterval(async () => {
-        const elapsed = Date.now() - startedAt;
-
-        if (elapsed > INSTALLER_EXIT_GRACE_MS) {
-          finish(false);
-          return;
-        }
-
-        let running = true;
-        try {
-          // Only trust the probe after the minimum window; a fast installer
-          // would otherwise look "already gone" before it even started.
-          if (elapsed < MIN_WATCH_MS) {
-            running = true;
-          } else {
-            running = await isProcessRunning(installerPath);
-          }
-        } catch (e) {
-          running = true; // on doubt, keep the files
-        }
-
-        if (!running) {
-          finish(true);
-          return;
-        }
-
+  /** Await the exact child process launched for this setup. */
+  async _waitForInstaller(launched, downloadId) {
+    if (launched && typeof launched === 'object' && launched.result) {
+      const outcome = await launched.result;
+      if (!outcome.ok) {
+        const cancelled = outcome.signal
+          || outcome.exitCode === 1223
+          || outcome.exitCode === 1602
+          || outcome.exitCode === 1604;
         this._publish(downloadId, {
-          phase: 'installing',
-          message: 'Waiting for the installer to finish…',
+          phase: cancelled ? 'installer-cancelled' : 'error',
+          error: cancelled
+            ? 'The installer was cancelled. The downloaded files were kept.'
+            : (outcome.error || 'The game installer failed.'),
+          exitCode: outcome.exitCode,
+          signal: outcome.signal,
+          message: cancelled ? 'Retry installation to continue.' : 'Download kept. Retry installation.',
         });
-      }, POLL_INTERVAL_MS);
-    });
+      }
+      return outcome;
+    }
+
+    // Backward-compatible test seam: true means an installer finished
+    // successfully; false/undefined means it did not.
+    if (typeof launched === 'boolean') {
+      return { ok: launched, exitCode: launched ? 0 : null, signal: null };
+    }
+    return { ok: true, exitCode: 0, signal: null };
   }
 }
 
@@ -411,33 +442,6 @@ function dependencyMessage(update) {
     default:
       return update.label || 'Working…';
   }
-}
-
-/**
- * True when a process is still running the given executable.
- * Compares only the file name so we do not need elevated rights to query.
- */
-function isProcessRunning(exePath) {
-  const { execFile } = require('child_process');
-  const target = path.basename(exePath).toLowerCase();
-
-  return new Promise((resolve) => {
-    execFile('tasklist.exe', ['/fo', 'csv', '/nh'], {
-      windowsHide: true,
-      timeout: 15000,
-      maxBuffer: 16 * 1024 * 1024,
-    }, (error, stdout) => {
-      if (error) {
-        // If we cannot tell, assume it is still running so files are kept.
-        resolve(true);
-        return;
-      }
-      const running = String(stdout)
-        .split(/\r?\n/)
-        .some((line) => line.toLowerCase().includes(`"${target}"`));
-      resolve(running);
-    });
-  });
 }
 
 module.exports = { AutoInstaller };

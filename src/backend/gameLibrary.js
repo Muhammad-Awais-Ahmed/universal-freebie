@@ -21,6 +21,33 @@ function parseSteamLibraryPaths(text, steamRoot) {
   return [...paths];
 }
 
+function getSteamRoots(options, env) {
+  const programFiles = env.ProgramFiles || 'C:\\Program Files';
+  const programFilesX86 = env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+  const localAppData = env.LOCALAPPDATA || path.join(env.USERPROFILE || '', 'AppData', 'Local');
+  return options.steamRoots || [
+    path.join(programFilesX86, 'Steam'),
+    path.join(programFiles, 'Steam'),
+    path.join(localAppData, 'Programs', 'Steam'),
+    path.join(env.USERPROFILE || '', 'Steam'),
+    'C:\\Steam',
+    'D:\\Steam',
+    'E:\\Steam',
+  ];
+}
+
+function getSteamLibraries(steamRoot, fsImpl) {
+  const librariesFile = path.join(steamRoot, 'steamapps', 'libraryfolders.vdf');
+  try {
+    if (fsImpl.existsSync(librariesFile)) {
+      return parseSteamLibraryPaths(fsImpl.readFileSync(librariesFile, 'utf8'), steamRoot);
+    }
+  } catch (error) {
+    console.warn(`[library-detect] Could not read Steam library list at ${librariesFile}:`, error.message);
+  }
+  return [steamRoot];
+}
+
 function normalizedName(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
@@ -119,27 +146,11 @@ function discoverInstalledGames(options = {}) {
   const programFilesX86 = env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
   const localAppData = env.LOCALAPPDATA || path.join(env.USERPROFILE || '', 'AppData', 'Local');
   const programData = env.ProgramData || 'C:\\ProgramData';
-  const steamRoots = options.steamRoots || [
-    path.join(programFilesX86, 'Steam'),
-    path.join(programFiles, 'Steam'),
-    path.join(localAppData, 'Programs', 'Steam'),
-    path.join(env.USERPROFILE || '', 'Steam'),
-    'C:\\Steam',
-    'D:\\Steam',
-    'E:\\Steam',
-  ];
+  const steamRoots = getSteamRoots(options, env);
   const candidates = new Map();
 
   for (const steamRoot of steamRoots) {
-    const librariesFile = path.join(steamRoot, 'steamapps', 'libraryfolders.vdf');
-    let libraries = [steamRoot];
-    try {
-      if (fsImpl.existsSync(librariesFile)) {
-        libraries = parseSteamLibraryPaths(fsImpl.readFileSync(librariesFile, 'utf8'), steamRoot);
-      }
-    } catch (error) {
-      console.warn(`[library-detect] Could not read Steam library list at ${librariesFile}:`, error.message);
-    }
+    const libraries = getSteamLibraries(steamRoot, fsImpl);
 
     const primarySteamApps = path.join(steamRoot, 'steamapps');
     let manifests = [];
@@ -234,6 +245,41 @@ function discoverInstalledGames(options = {}) {
   return [...candidates.values()];
 }
 
+function isSteamAppInstalled(rawAppId, options = {}) {
+  const appId = String(rawAppId || '').trim();
+  if (!/^\d+$/.test(appId) || !Number.isSafeInteger(Number(appId)) || Number(appId) <= 0) return false;
+
+  const fsImpl = options.fs || fs;
+  const env = options.env || process.env;
+  const platform = options.platform || process.platform;
+  if (platform !== 'win32') {
+    throw new Error('Steam install status checks are currently supported on Windows only.');
+  }
+
+  for (const steamRoot of getSteamRoots(options, env)) {
+    for (const library of getSteamLibraries(steamRoot, fsImpl)) {
+      const appsDirectory = path.join(library, 'steamapps');
+      const manifestPath = path.join(appsDirectory, `appmanifest_${appId}.acf`);
+      try {
+        if (!fsImpl.existsSync(manifestPath)) continue;
+        const manifest = fsImpl.readFileSync(manifestPath, 'utf8');
+        const stateFlags = Number(readVdfValue(manifest, 'StateFlags'));
+        const installDirectory = readVdfValue(manifest, 'installdir');
+        if (
+          !Number.isSafeInteger(stateFlags) ||
+          (stateFlags & 4) !== 4 ||
+          !installDirectory
+        ) continue;
+        if (fsImpl.existsSync(path.join(appsDirectory, 'common', installDirectory))) return true;
+      } catch (error) {
+        console.warn(`[library-detect] Could not check Steam app manifest ${manifestPath}:`, error.message);
+      }
+    }
+  }
+
+  return false;
+}
+
 async function lookupWebIcon(gameName, fetchImpl = global.fetch) {
   if (typeof fetchImpl !== 'function') throw new Error('Web icon lookup is unavailable in this runtime.');
   const controller = new AbortController();
@@ -266,6 +312,7 @@ async function lookupWebIcon(gameName, fetchImpl = global.fetch) {
 module.exports = {
   discoverInstalledGames,
   findGameExecutable,
+  isSteamAppInstalled,
   lookupWebIcon,
   parseSteamLibraryPaths,
   readVdfValue,

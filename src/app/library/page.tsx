@@ -51,6 +51,11 @@ interface FolderEntry {
   modifiedAt: string;
 }
 
+interface FolderReadError {
+  name: string;
+  code: string;
+}
+
 export default function LibraryPage() {
   const [tab, setTab] = useState<Tab>("installed");
   const [installed, setInstalled] = useState<InstalledGame[]>([]);
@@ -111,8 +116,24 @@ export default function LibraryPage() {
   const loadFolderContents = useCallback(async () => {
     setFolderLoading(true);
     try {
-      const entries = await invoke("get-folder-contents");
-      setFolderEntries(Array.isArray(entries) ? entries : []);
+      const result = await invoke("get-folder-contents");
+      if (!result || !Array.isArray(result.entries) || !Array.isArray(result.errors)) {
+        throw new Error("Invalid folder contents response.");
+      }
+
+      setFolderEntries(result.entries);
+      const errors: FolderReadError[] = result.errors;
+      if (errors.length > 0) {
+        const details = errors.slice(0, 3).map(({ name, code }) => {
+          const reason = code === "EACCES" || code === "EPERM" ? "access denied" : "could not be read";
+          return `${name} (${reason})`;
+        });
+        const remaining = errors.length - details.length;
+        const suffix = remaining > 0 ? `, and ${remaining} more` : "";
+        setNotice(`Some items could not be shown: ${details.join(", ")}${suffix}.`);
+      } else {
+        setNotice("");
+      }
     } catch (err) {
       console.error("Failed to load folder contents:", err);
       setFolderEntries([]);
@@ -277,7 +298,7 @@ export default function LibraryPage() {
       </div>
 
       {notice && (
-        <div className={styles.notice}>
+        <div className={styles.notice} role="status" aria-live="polite">
           <span>{notice}</span>
           <button className={styles.noticeClose} onClick={() => setNotice("")}>
             <X className="w-3 h-3" />

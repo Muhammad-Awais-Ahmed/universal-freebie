@@ -19,8 +19,10 @@
     "test:downloads": "node tools/test-download-progress-logic.js",
     "test:proxies": "node tools/test-proxy-pool-target.js",
     "test:resume": "node tools/test-resume-support.js && node tools/test-chunk-resume.js && node tools/test-download-history-resume.js && node tools/test-resume-protocols.js",
+    "test:storage": "node tools/test-storage-explorer.js",
     "test:library": "node tools/test-game-library.js",
-    "test:featured": "node tools/test-featured-games.js",
+    "test:featured": "node tools/test-standalone-games.js",
+    "test:standalone": "node tools/test-standalone-games.js",
     "test:aliases": "node tools/test-search-aliases.js",
     "test:model": "node tools/test-model-fallback-logic.js && node tools/test-ai-installer-routing.js",
     "test:update": "node tools/test-update-version-logic.js",
@@ -36,7 +38,8 @@
     "next": "16.2.9",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "webtorrent": "^1.9.7"
+    "webtorrent": "^1.9.7",
+    "yauzl": "^2.10.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",
@@ -62,6 +65,7 @@
       "out/**/*",
       "electron/**/*",
       "src/backend/**/*",
+      "src/data/standaloneGames.json",
       "package.json",
       "node_modules/**/*"
     ],

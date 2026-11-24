@@ -17,7 +17,7 @@ candidate to run.
 ```json
 {
   "gameTitle": "Some Game",
-  "source": "Archive.org",
+  "source": "Direct link",
   "files": [
     { "path": "Setup/Game.exe", "extension": ".exe", "size": 1234567 },
     { "path": "data.bin", "extension": ".bin", "size": 9876543 }
@@ -31,7 +31,7 @@ its existing logic:
 ```json
 {
   "object": "chat.completion",
-  "model": "google/gemma-3-12b-it",
+  "model": "nvidia/nemotron-3.5-bolt-e4b",
   "choices": [
     {
       "index": 0,
@@ -50,7 +50,7 @@ its existing logic:
 | Variable               | Required | Default                        | Description                                  |
 | ---------------------- | -------- | ------------------------------ | -------------------------------------------- |
 | `NVIDIA_NIM_API_KEY`   | yes      | —                              | NVIDIA NIM API key (never exposed to client) |
-| `NVIDIA_NIM_MODEL`     | no       | `google/gemma-3-12b-it`        | First model tried; can be a provider-supported alias |
+| `NVIDIA_NIM_MODEL`     | no       | `nvidia/nemotron-3.5-bolt-e4b` | First model tried; can be a provider-supported alias |
 | `NVIDIA_NIM_FALLBACK_MODELS` | no | built-in list | Comma-separated fallback IDs, capped at 8 plus the primary model |
 | `NVIDIA_NIM_BASE_URL`  | no       | NIM chat completions endpoint   | Override endpoint if needed                   |
 | `AI_CLIENT_TOKEN`      | no       | —                              | If set, clients must send `X-App-Token`       |
@@ -69,6 +69,10 @@ for the life of the process, so a retirement costs one extra request rather than
 one per request. A custom model such as `combo 21559-m` can be placed in either
 variable only when the configured API endpoint recognizes that identifier.
 
+The built-in models are maintained against NVIDIA's current NIM catalog. The
+chat request is non-streaming and asks the model for JSON in the prompt; it does
+not send `response_format`, which is not supported by every current NIM model.
+
 Only `404`, `410`, and `503` advance the chain. Everything else, such as a bad
 key or a rate limit, is surfaced immediately, so a real problem is never
 masked by retries.
@@ -80,8 +84,8 @@ answering:
 {
   "ok": true,
   "aiConfigured": true,
-  "model": "google/gemma-3-12b-it",
-  "configuredModel": "google/gemma-3-12b-it",
+  "model": "nvidia/nemotron-3.5-bolt-e4b",
+  "configuredModel": "nvidia/nemotron-3.5-bolt-e4b",
   "clientTokenRequired": false
 }
 ```

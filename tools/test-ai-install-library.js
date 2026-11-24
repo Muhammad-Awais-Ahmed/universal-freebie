@@ -9,22 +9,34 @@ fs.writeFileSync(archivePath, 'not-a-real-archive');
 
 let dependencyOutcome = { installed: [], failed: [] };
 let dependencyOk = true;
+let cleanupCount = 0;
 
 const fakeAiInstaller = {
   planInstall: async () => ({
     installerPath: path.join(tempRoot, 'GameLauncher.exe'),
     displayPath: 'GameLauncher.exe',
+    stagingDirectory: tempRoot,
     confidence: 0.98,
     reason: 'Fake installer match for regression test',
   }),
   runInstaller: () => ({ ok: true, result: Promise.resolve({ ok: true, exitCode: 0, signal: null }) }),
   installMissingDependencies: async () => Object.assign({ ok: dependencyOk }, dependencyOutcome),
-  cleanupDownloadArtifacts: () => ({ removed: [], skipped: [] }),
+  cleanupDownloadArtifacts: () => {
+    cleanupCount += 1;
+    return { removed: [], skipped: [] };
+  },
   pruneEmptyStaging: () => {},
-  findGameExecutable: (root) => ({
-    absolutePath: path.join(root, 'GameLauncher.exe'),
-    size: 1234,
-  }),
+  findGameExecutable: (root) => {
+    try {
+      if (!fs.statSync(root).isDirectory()) return null;
+    } catch (error) {
+      return null;
+    }
+    return {
+      absolutePath: path.join(root, 'GameLauncher.exe'),
+      size: 1234,
+    };
+  },
   isLikelyGameExecutable: () => true,
   INSTALLED_DIR_NAME: 'Universal-Freebie-Installed',
   STAGING_DIR_NAME: 'Universal-Freebie-Installs',
@@ -71,6 +83,80 @@ Module._load = originalLoad;
 
   if (!registered) {
     console.log('FAIL: library registration was skipped in the keep-files install path');
+    process.exit(1);
+  }
+
+  const failedInstaller = new AutoInstaller(() => ({
+    autoInstallEnabled: true,
+    autoInstallDependencies: false,
+    autoLaunchInstaller: true,
+    autoDeleteAfterInstall: false,
+    downloadDirectory: tempRoot,
+  }));
+  failedInstaller._waitForInstaller = async () => ({
+    ok: false,
+    exitCode: 1,
+    signal: null,
+    error: 'Installer exited with code 1.',
+  });
+  await failedInstaller.handleCompleted({
+    id: 'dl-installer-failed',
+    filename: 'Failed.zip',
+    filePath: archivePath,
+    source: 'Test Source',
+  }, { force: true });
+
+  const failedState = failedInstaller.getState('dl-installer-failed');
+  if (!failedState || failedState.phase !== 'error' || failedState.exitCode !== 1) {
+    console.log('FAIL: failed installer state was overwritten or left active');
+    process.exit(1);
+  }
+
+  const cleanupFailure = new AutoInstaller(() => ({
+    autoInstallEnabled: true,
+    autoInstallDependencies: false,
+    autoLaunchInstaller: true,
+    autoDeleteAfterInstall: true,
+    downloadDirectory: tempRoot,
+  }));
+  cleanupFailure._waitForInstaller = async () => ({
+    ok: false,
+    exitCode: 1,
+    signal: null,
+    error: 'Installer exited with code 1.',
+  });
+  const cleanupCountBeforeFailure = cleanupCount;
+  await cleanupFailure.handleCompleted({
+    id: 'dl-cleanup-failed',
+    filename: 'FailedCleanup.zip',
+    filePath: archivePath,
+    source: 'Test Source',
+  }, { force: true });
+  if (cleanupFailure.getState('dl-cleanup-failed')?.phase !== 'error'
+    || cleanupCount !== cleanupCountBeforeFailure) {
+    console.log('FAIL: unsuccessful install was cleaned up or reported as successful');
+    process.exit(1);
+  }
+
+  const unverifiedInstall = new AutoInstaller(() => ({
+    autoInstallEnabled: true,
+    autoInstallDependencies: false,
+    autoLaunchInstaller: true,
+    autoDeleteAfterInstall: true,
+    downloadDirectory: tempRoot,
+  }));
+  unverifiedInstall._waitForInstaller = async () => ({ ok: true, exitCode: 0, signal: null });
+  const cleanupCountBeforeUnverified = cleanupCount;
+  await unverifiedInstall.handleCompleted({
+    id: 'dl-unverified-install',
+    filename: 'Portable.zip',
+    filePath: archivePath,
+    source: 'Test Source',
+  }, { force: true });
+  const unverifiedState = unverifiedInstall.getState('dl-unverified-install');
+  if (unverifiedState?.phase !== 'installed'
+    || cleanupCount !== cleanupCountBeforeUnverified) {
+    console.log('FAIL: source files were removed without verifying the installed game location');
     process.exit(1);
   }
 
@@ -124,6 +210,6 @@ Module._load = originalLoad;
     process.exit(1);
   }
 
-  console.log('PASS: auto-install library registration, prerequisite blocking, and restart reconciliation');
+  console.log('PASS: auto-install failure retention, safe cleanup, library registration, prerequisite blocking, and restart reconciliation');
   process.exit(0);
 })();

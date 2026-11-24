@@ -3,8 +3,7 @@
  *
  * Runs as a side-effect of a download completing:
  *   1. Ask the AI backend which file in the download is the real installer.
- *   2. Install every prerequisite runtime the machine is actually missing
- *      (Visual C++ / DirectX / .NET), silently and in the correct order.
+ *   2. Install missing prerequisite runtimes that shipped with the download.
  *   3. Launch the game's installer.
  *   4. Once that installer exits, delete the archive, the extracted staging
  *      tree and any sidecar files — the installed game is untouched.
@@ -23,7 +22,6 @@ const {
   cleanupDownloadArtifacts,
   pruneEmptyStaging,
   findGameExecutable,
-  isLikelyGameExecutable,
   INSTALLED_DIR_NAME,
 } = require('./aiInstaller');
 
@@ -212,8 +210,8 @@ class AutoInstaller extends EventEmitter {
         dependenciesInstalled: (dependencies.installed || []).map((entry) => entry.label),
         dependenciesFailed: failedLabels,
         message: (dependencies.installed || []).length
-          ? `Installed ${(dependencies.installed || []).length} prerequisite(s).`
-          : 'No missing prerequisites.',
+          ? `Installed ${(dependencies.installed || []).length} bundled prerequisite(s).`
+          : 'No bundled prerequisites needed installation.',
       });
 
       if (failedLabels.length || dependencies.ok === false) {
@@ -252,54 +250,61 @@ class AutoInstaller extends EventEmitter {
       return;
     }
 
-    const outcome = await this._waitForInstaller(launched, item.id);
+    const outcome = await this._waitForInstaller(launched);
     const finished = typeof outcome === 'boolean'
       ? outcome
       : outcome && outcome.ok === true;
 
-    if (settings.autoDeleteAfterInstall === true) {
-      if (finished) {
-        // Register the game BEFORE the staging tree is deleted: for in-place /
-        // "portable" repacks the runnable binary is the thing being removed.
-        const library = this._registerInLibrary({
-          item,
-          plan,
-          stagingDirectory,
-          downloadDirectory,
-        });
-
-        const cleanup = cleanupDownloadArtifacts({
-          filePath,
-          stagingDirectory,
-          downloadDirectory,
-        });
-        pruneEmptyStaging(downloadDirectory);
-
-        this._publish(item.id, {
-          phase: 'cleaned',
-          message: library
-            ? `Installation finished. Added "${library.name}" to your library.`
-            : `Installation finished. Removed ${cleanup.removed.length} downloaded file(s).`,
-          removed: cleanup.removed,
-          cleanupSkipped: cleanup.skipped,
-          library,
-        });
-        return;
-      }
-
+    if (!finished) {
       const exitCode = typeof outcome === 'object' ? outcome.exitCode : null;
       const signal = typeof outcome === 'object' ? outcome.signal : null;
       const cancelled = signal || exitCode === 1223 || exitCode === 1602 || exitCode === 1604;
       this._publish(item.id, {
-        phase: cancelled ? 'installer-cancelled' : 'cleanup-skipped',
+        phase: cancelled ? 'installer-cancelled' : 'error',
         error: cancelled
           ? 'The installer was cancelled. The downloaded files were kept.'
-          : (typeof outcome === 'object' && outcome.error ? outcome.error : null),
+          : (typeof outcome === 'object' && outcome.error) || 'The game installer failed.',
         exitCode,
         signal,
         message: cancelled
           ? 'Retry installation to continue.'
-          : 'The installer did not finish successfully, so the downloaded files were kept.',
+          : 'The installer did not finish successfully. Download kept — retry installation.',
+      });
+      return;
+    }
+
+    if (settings.autoDeleteAfterInstall === true) {
+      // Only remove the source after finding the game in the app-managed
+      // Installed folder. Setup programs often install elsewhere, and an
+      // executable found in staging may itself be the portable game.
+      const library = this._registerInLibrary({
+        item,
+        plan,
+        stagingDirectory: null,
+        downloadDirectory,
+        requireGameFolder: true,
+      });
+      if (!library) {
+        this._publish(item.id, {
+          phase: 'installed',
+          message: 'Installation finished, but the game location could not be verified. Downloaded files were kept.',
+        });
+        return;
+      }
+
+      const cleanup = cleanupDownloadArtifacts({
+        filePath,
+        stagingDirectory,
+        downloadDirectory,
+      });
+      pruneEmptyStaging(downloadDirectory);
+
+      this._publish(item.id, {
+        phase: 'cleaned',
+        message: `Installation finished. Added "${library.name}" to your library.`,
+        removed: cleanup.removed,
+        cleanupSkipped: cleanup.skipped,
+        library,
       });
       return;
     }
@@ -307,27 +312,19 @@ class AutoInstaller extends EventEmitter {
     // Register the game once the installer is actually finished, even when the
     // download is preserved in-place. This keeps the post-install flow real-time
     // and makes the library update happen without any extra user click.
-    if (finished) {
-      const library = this._registerInLibrary({
-        item,
-        plan,
-        stagingDirectory,
-        downloadDirectory,
-      });
-
-      this._publish(item.id, {
-        phase: 'installed',
-        message: library
-          ? `Installation finished. Added "${library.name}" to your library.`
-          : 'Installation finished. The game is ready — add it to the library from the Library page if needed.',
-        library,
-      });
-      return;
-    }
+    const library = this._registerInLibrary({
+      item,
+      plan,
+      stagingDirectory,
+      downloadDirectory,
+    });
 
     this._publish(item.id, {
-      phase: 'installing',
-      message: 'Waiting for the installer to finish…',
+      phase: 'installed',
+      message: library
+        ? `Installation finished. Added "${library.name}" to your library.`
+        : 'Installation finished. The game is ready — add it to the library from the Library page if needed.',
+      library,
     });
   }
 
@@ -338,14 +335,18 @@ class AutoInstaller extends EventEmitter {
    * successful install into an error, it just means the game is not
    * pre-registered and the user can add it by hand.
    */
-  _registerInLibrary({ item, plan, stagingDirectory, downloadDirectory }) {
+  _registerInLibrary({ item, plan, stagingDirectory, downloadDirectory, requireGameFolder = false }) {
     if (typeof this.onRegisterGame !== 'function') return null;
 
     const installerPath = (plan && plan.installerPath) || null;
+    const installedRoot = path.join(downloadDirectory, INSTALLED_DIR_NAME);
+    const installedGameRoot = requireGameFolder
+      ? path.join(installedRoot, safeName(String(item.filename || 'game').replace(/\.[^.]+$/, '')))
+      : installedRoot;
     const roots = [
       stagingDirectory,
       item.filePath,
-      path.join(downloadDirectory, INSTALLED_DIR_NAME),
+      installedGameRoot,
     ].filter(Boolean);
 
     for (const root of roots) {
@@ -376,25 +377,9 @@ class AutoInstaller extends EventEmitter {
   }
 
   /** Await the exact child process launched for this setup. */
-  async _waitForInstaller(launched, downloadId) {
+  async _waitForInstaller(launched) {
     if (launched && typeof launched === 'object' && launched.result) {
-      const outcome = await launched.result;
-      if (!outcome.ok) {
-        const cancelled = outcome.signal
-          || outcome.exitCode === 1223
-          || outcome.exitCode === 1602
-          || outcome.exitCode === 1604;
-        this._publish(downloadId, {
-          phase: cancelled ? 'installer-cancelled' : 'error',
-          error: cancelled
-            ? 'The installer was cancelled. The downloaded files were kept.'
-            : (outcome.error || 'The game installer failed.'),
-          exitCode: outcome.exitCode,
-          signal: outcome.signal,
-          message: cancelled ? 'Retry installation to continue.' : 'Download kept. Retry installation.',
-        });
-      }
-      return outcome;
+      return launched.result;
     }
 
     // Backward-compatible test seam: true means an installer finished

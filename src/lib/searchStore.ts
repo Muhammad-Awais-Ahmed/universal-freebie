@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
-const STORAGE_KEY = 'uf:games-search';
+const STORAGE_KEY = 'uf:games-search-v3';
 const PERSIST_DEBOUNCE_MS = 250;
 
 export interface GameResult {
@@ -33,9 +33,7 @@ export interface GameResult {
 }
 
 export type SearchFilters = {
-  archive: boolean;
-  fitgirl: boolean;
-  steamunlocked: boolean;
+  officialStandalone: boolean;
 };
 
 export interface SearchState {
@@ -55,9 +53,7 @@ export interface SearchState {
 }
 
 export const DEFAULT_FILTERS: SearchFilters = {
-  archive: true,
-  fitgirl: true,
-  steamunlocked: true,
+  officialStandalone: true,
 };
 
 const SERVER_STATE: SearchState = Object.freeze({
@@ -137,12 +133,25 @@ function hydrateOnce(): void {
     if (!raw) return;
     const saved = JSON.parse(raw) as Partial<SearchState>;
     if (!saved || typeof saved !== 'object') return;
+    const savedStandaloneFilter = (saved.filters as Partial<SearchFilters> | undefined)?.officialStandalone;
     state = {
       ...SERVER_STATE,
       ...saved,
-      filters: { ...DEFAULT_FILTERS, ...(saved.filters ?? {}) },
+      filters: {
+        officialStandalone: typeof savedStandaloneFilter === 'boolean' ? savedStandaloneFilter : true,
+      },
+      sizeFilter: 'all',
+      sourceFilter: saved.sourceFilter === 'officialStandalone' ? 'officialStandalone' : 'all',
+      sortBy: typeof saved.sortBy === 'string' && ['relevance', 'year-desc', 'year-asc', 'title-asc'].includes(saved.sortBy)
+        ? saved.sortBy
+        : 'relevance',
       searching: false,
-      results: Array.isArray(saved.results) ? saved.results : [],
+      results: Array.isArray(saved.results)
+        ? saved.results.filter((game) =>
+          game
+          && game.source === 'Official standalone download'
+        )
+        : [],
     };
     emit();
   } catch {
@@ -174,6 +183,21 @@ export function useSearchStore(): SearchState {
 export const searchActions = {
   setQuery(query: string): void {
     setState({ query });
+  },
+
+  clearSearch(): void {
+    setState({
+      query: '',
+      results: [],
+      hasSearched: false,
+      searchedQuery: '',
+      searchedSources: '',
+      searching: false,
+      selectedYear: 'all',
+      sizeFilter: 'all',
+      sourceFilter: 'all',
+      sortBy: 'relevance',
+    });
   },
 
   setFilters(filters: SearchFilters): void {

@@ -1440,16 +1440,18 @@ class Downloader {
     setTimeout(() => {
       const item = this.downloads.get(id);
       if (item && (item.status === 'completed' || item.status === 'cancelled')) {
-        // A finished download is only dropped once the auto-installer is no
-        // longer working on it. Evicting on a bare 30s timer raced the UI:
+        // A finished download is only dropped once its installer is no longer
+        // working on it. Evicting on a bare 30s timer raced the UI:
         // the "Install" button was still on screen (the renderer keeps its own
         // copy of the row) but the backing item was already gone, so clicking
         // it failed with "That download is no longer in the list." The item is
-        // also what `add-download-to-library` resolves a path from, so losing
-        // it silently made the game un-addable. Now the row is released only
-        // after the pipeline reports a terminal phase, and only if the user
-        // never asked to keep it.
-        if (this._isInstallPending(id)) return;
+        // also what `add-download-to-library` resolves a path from. Keep
+        // retryable or unfinished installs available until the user removes
+        // the row; successful installs can still expire normally.
+        if (this._isInstallPending(id)) {
+          this._scheduleAutoRemove(id);
+          return;
+        }
         if (item.type === 'torrent' && item.torrentInfo) {
           try { item.torrentInfo.destroy(); } catch (e) {}
         }
@@ -1466,8 +1468,8 @@ class Downloader {
     }, COMPLETED_AUTO_REMOVE_MS);
   }
 
-  // True while the AI install pipeline is still mid-flight for this download.
-  // Set by main.js so the downloader does not need to know about installers.
+  // Set by main.js so the downloader can retain active or retryable installs
+  // without knowing about installer-specific phases.
   _isInstallPending(id) {
     if (typeof this.isInstallPending !== 'function') return false;
     try {
@@ -1682,7 +1684,8 @@ class Downloader {
           id: d.meta.id,
           title: d.meta.title,
           source: d.meta.source,
-          description: d.meta.description
+          description: d.meta.description,
+          standaloneGameId: d.meta.standaloneGameId
         } : undefined
       }));
 

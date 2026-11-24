@@ -37,8 +37,7 @@ const ACTIVE_PHASES = new Set([
   "dependency",
   "dependency-download",
   "dependency-installing",
-  "installing",
-  "cleaned"
+  "installing"
 ]);
 
 function isActiveInstall(state?: AutoInstallState | null): boolean {
@@ -60,7 +59,7 @@ const PHASE_LABELS: Record<string, string> = {
   "dependencies-done": "Prerequisites ready",
   installing: "Installing game",
   cleaned: "Done — files removed",
-  installed: "Installer started",
+  installed: "Installation finished — files kept",
   skipped: "No installer found",
   "awaiting-manual-install": "Start it yourself",
   "cleanup-skipped": "Files kept",

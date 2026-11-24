@@ -26,6 +26,8 @@ const path = require('path');
 
 const SRC = path.join(__dirname, '..', 'src', 'backend', 'downloader.js');
 const source = fs.readFileSync(SRC, 'utf8');
+const MAIN_SRC = path.join(__dirname, '..', 'electron', 'main.js');
+const mainSource = fs.readFileSync(MAIN_SRC, 'utf8');
 
 let passed = 0;
 let failed = 0;
@@ -166,6 +168,24 @@ check(
 check(
   'partial progress is still persisted for resume',
   /updateDownloadHistory\(item\.id, \{\s*\n\s*status: 'downloading'/.test(source)
+);
+
+// ---------------------------------------------------------------------------
+// 5. Completed downloads remain available while auto-install is running
+// ---------------------------------------------------------------------------
+console.log('\n# completed downloads are retained during auto-install');
+
+const removeScheduler = sliceBetween('_scheduleAutoRemove(id) {', '\n  // Set by main.js so the downloader');
+const pendingCheck = mainSource.match(/globalDownloader\.isInstallPending = \(downloadId\) => \{[\s\S]*?\n  \};/);
+check(
+  'the main process retains active and retryable installs',
+  !!pendingCheck
+    && /autoInstaller\.active\.has\(downloadId\)/.test(pendingCheck[0])
+    && /'error'[\s\S]*'prerequisite-failed'/.test(pendingCheck[0])
+);
+check(
+  'a download that is still installing gets another retention check',
+  /if \(this\._isInstallPending\(id\)\) \{\s*this\._scheduleAutoRemove\(id\);\s*return;\s*\}/.test(removeScheduler)
 );
 
 // ---------------------------------------------------------------------------

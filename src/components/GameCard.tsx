@@ -1,56 +1,54 @@
 "use client";
 
 import styles from "./GameCard.module.css";
-import { formatBytes, formatYearDisplay, getSizeTooltip } from "@/utils/formatters";
-import { DownloadCloud, HardDrive, Calendar, Gamepad2 } from "lucide-react";
-import { useState } from "react";
+import { formatYearDisplay } from "@/utils/formatters";
+import { DownloadCloud, Play, Loader2, Calendar } from "lucide-react";
+import GameArtwork from "@/components/GameArtwork";
 
 interface Game {
   id: string;
   title: string;
   source: string;
   description?: string;
-  size?: string | number;
   year?: string | number;
+  icon?: string;
   thumbnail?: string;
   url?: string;
 }
 
 function getSourceClass(source: string): string {
   const s = (source || "").toLowerCase();
-  if (s.includes("fitgirl")) return styles.badgeFitgirl;
-  if (s.includes("archive")) return styles.badgeArchive;
-  if (s.includes("steam")) return styles.badgeSteamunlocked;
+  if (s.includes("official standalone")) return styles.badgeOfficial;
   return styles.badgeDefault;
 }
 
 export default function GameCard({
   game,
-  onDownload,
+  isInstalled,
+  isChecking,
+  isBusy,
+  onInstall,
+  onPlay,
 }: {
   game: Game;
-  onDownload: (game: Game) => void;
+  isInstalled: boolean;
+  isChecking: boolean;
+  isBusy: boolean;
+  onInstall: (game: Game) => void;
+  onPlay: (game: Game) => void;
 }) {
-  const formattedSize = formatBytes(game.size);
-  const sizeTooltip = getSizeTooltip(game.size);
   const formattedYear = formatYearDisplay(game.year);
-  const [imageFailed, setImageFailed] = useState(false);
 
   return (
     <div className={styles.card}>
       <div className={styles.imageContainer}>
-        {game.thumbnail && !imageFailed ? (
-          <img
-            src={game.thumbnail}
-            alt={game.title}
-            className={styles.image}
-            onError={() => setImageFailed(true)}
-          />
-        ) : (
-          <div className={styles.imageFallback} aria-label={`No image available for ${game.title}`}>
-            <Gamepad2 aria-hidden="true" />
-          </div>
-        )}
+        <GameArtwork
+          title={game.title}
+          imageUrl={game.thumbnail}
+          icon={game.icon}
+          imageClassName={styles.image}
+          fallbackClassName={styles.imageFallback}
+        />
         <div className={styles.imageOverlay} />
         <div className={`${styles.sourceBadge} ${getSourceClass(game.source)}`}>
           {game.source}
@@ -63,12 +61,6 @@ export default function GameCard({
         </h3>
 
         <div className={styles.meta}>
-          {game.size && (
-            <span className={`${styles.tag} ${styles.tagBlue}`} title={sizeTooltip}>
-              <HardDrive className="w-3 h-3" />
-              {formattedSize}
-            </span>
-          )}
           {game.year && (
             <span className={`${styles.tag} ${styles.tagRed}`}>
               <Calendar className="w-3 h-3" />
@@ -78,17 +70,27 @@ export default function GameCard({
         </div>
 
         <p className={styles.description}>
-          {game.description || "Pre-indexed verified game release package ready for high-speed download."}
+          {game.description || "No description is available yet."}
         </p>
 
         <button
           type="button"
           className={styles.downloadBtn}
-          onClick={() => onDownload(game)}
-          aria-label={`Download ${game.title}`}
+          onClick={() => (isInstalled ? onPlay(game) : onInstall(game))}
+          disabled={isChecking || isBusy}
+          aria-label={
+            isChecking ? `Checking installation status for ${game.title}`
+              : isBusy ? `Installing ${game.title}`
+                : isInstalled ? `Play ${game.title}`
+                  : `Download and install ${game.title}`
+          }
         >
-          <DownloadCloud className="w-4 h-4" aria-hidden="true" />
-          Download Game
+          {isChecking || isBusy
+            ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+            : isInstalled
+              ? <Play className="w-4 h-4" aria-hidden="true" />
+              : <DownloadCloud className="w-4 h-4" aria-hidden="true" />}
+          {isChecking ? "Checking…" : isBusy ? "Installing…" : isInstalled ? "Play" : "Download"}
         </button>
       </div>
     </div>

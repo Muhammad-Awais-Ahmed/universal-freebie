@@ -1,14 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import SearchModule from "@/components/SearchModule";
 import GameCard from "@/components/GameCard";
+import GameArtwork from "@/components/GameArtwork";
 import LinkDownload from "@/components/LinkDownload";
-import { extractYearNumber, parseSizeBytes } from "@/utils/formatters";
+import { extractYearNumber } from "@/utils/formatters";
 import styles from "./games.module.css";
 import searchStyles from "@/components/Search.module.css";
-import { Calendar, ArrowUpDown, X, ChevronRight, Archive, Flame, Gamepad2, HardDrive, Sparkles } from "lucide-react";
-import featuredCatalog from "@/data/featuredGames.json";
+import { Calendar, ArrowUpDown, X, ChevronRight, Gamepad2, Sparkles } from "lucide-react";
+import standaloneCatalog from "@/data/standaloneGames.json";
 import {
   useSearchStore,
   searchActions,
@@ -19,37 +20,17 @@ import {
 } from "@/lib/searchStore";
 
 const sourceFilters = [
-  { key: "archive", label: "Archive.org" },
-  { key: "fitgirl", label: "FitGirl" },
-  { key: "steamunlocked", label: "SteamUnlocked" },
+  { key: "officialStandalone", label: "Official standalone games" },
 ];
 
 const FEATURED_SOURCES = [
   {
-    key: "archive",
-    label: "Archive.org",
-    desc: "Open-access digital library",
-    color: "#22d3ee",
-    bg: "rgba(34,211,238,0.08)",
-    border: "rgba(34,211,238,0.2)",
-    icon: Archive,
-  },
-  {
-    key: "fitgirl",
-    label: "FitGirl Repacks",
-    desc: "Compact high-quality repacks",
-    color: "#ef4444",
-    bg: "rgba(239,68,68,0.08)",
-    border: "rgba(239,68,68,0.2)",
-    icon: Flame,
-  },
-  {
-    key: "steamunlocked",
-    label: "SteamUnlocked",
-    desc: "Pre-installed ready-to-play",
-    color: "#22c55e",
-    bg: "rgba(34,197,94,0.08)",
-    border: "rgba(34,197,94,0.2)",
+    key: "officialStandalone",
+    label: "Official standalone games",
+    desc: "Direct downloads from each game's official project",
+    color: "#38bdf8",
+    bg: "rgba(56,189,248,0.08)",
+    border: "rgba(56,189,248,0.2)",
     icon: Gamepad2,
   },
 ];
@@ -58,24 +39,28 @@ interface FeaturedGame {
   id: string;
   title: string;
   series: string;
-  searchQuery: string;
-  steamQuery: string | null;
-  steamYear: number | null;
   year: number;
-  tags: string[];
+  icon: string;
+  thumbnail: string;
+  version: string;
   description: string;
+  downloadUrl: string;
+  filename: string;
+  homepage: string;
+  downloadSize: string;
 }
 
-interface FeaturedMeta {
-  shortDescription?: string;
-  detailedDescription?: string;
-  headerImage?: string;
-  storeUrl?: string;
+interface InstallStatus {
+  installed: boolean;
+  phase: string | null;
+  error?: string;
 }
 
-// Curated suggestions shown before any search (src/data/featuredGames.json).
-// Cards are enriched with official Steam metadata via the main process.
-const FEATURED_GAMES: FeaturedGame[] = featuredCatalog.games;
+const FEATURED_GAMES: FeaturedGame[] = standaloneCatalog.games;
+const GAME_RESULTS = FEATURED_GAMES.map((game) => ({
+  ...game,
+  source: "Official standalone download",
+}));
 
 export default function GamesPage() {
   // Search state lives in a module-level store so results persist across
@@ -86,91 +71,54 @@ export default function GamesPage() {
     results,
     searching,
     hasSearched,
-    searchedQuery,
-    searchedSources,
     selectedYear,
-    sizeFilter,
     sourceFilter,
     sortBy,
   } = useSearchStore();
 
   const setQuery = searchActions.setQuery;
   const setSelectedYear = searchActions.setSelectedYear;
-  const setSizeFilter = searchActions.setSizeFilter;
   const setSourceFilter = searchActions.setSourceFilter;
   const setSortBy = searchActions.setSortBy;
 
-  const searchSeqRef = useRef(0);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [expandedIds, setExpandedIds] = useState<string[]>([]);
-  const [featuredMeta, setFeaturedMeta] = useState<Record<string, FeaturedMeta>>({});
+  const [downloadNotice, setDownloadNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [installStatus, setInstallStatus] = useState<Record<string, InstallStatus>>({});
+  const [installStatusLoading, setInstallStatusLoading] = useState(true);
 
   const toggleFilter = (key: string) => {
-    searchActions.toggleFilter(key);
+    if (!Object.prototype.hasOwnProperty.call(filters, key)) return;
+    const filterKey = key as keyof typeof filters;
+    const nextFilters = { ...filters, [filterKey]: !filters[filterKey] };
+    searchActions.setFilters(nextFilters);
+    if (hasSearched) {
+      const activeSources = Object.entries(nextFilters).filter(([, enabled]) => enabled).map(([source]) => source);
+      runSearch(query, { sources: activeSources, force: true });
+    }
   };
 
-  /**
-   * Run a search with a sequence guard so only the latest request can apply
-   * its results (stale responses are dropped). Revisiting an earlier
-   * query+sources combination is served instantly from the in-memory cache.
-   */
-  const runSearch = useCallback(
-    (rawQuery: string, opts?: { force?: boolean; sources?: string[] }) => {
-      const q = normalizeQuery(rawQuery);
-      if (!q) return;
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-        debounceRef.current = null;
-      }
+  const runSearch = useCallback((rawQuery: string, opts?: { force?: boolean; sources?: string[] }) => {
+    const q = normalizeQuery(rawQuery);
+    const activeSources = opts?.sources ?? Object.entries(filters).filter(([, enabled]) => enabled).map(([source]) => source);
+    const sourcesKey = sourceKeysToKey(activeSources);
+    const cached = !opts?.force ? getCachedResults(q, sourcesKey) : null;
+    if (cached) {
+      setSearchError(null);
+      searchActions.applyCachedResults(q, activeSources, cached);
+      return;
+    }
 
-      const activeSources =
-        opts?.sources ?? Object.entries(filters).filter(([, v]) => v).map(([k]) => k);
-      const sourcesKey = sourceKeysToKey(activeSources);
-
-      if (!opts?.force) {
-        const cached = getCachedResults(q, sourcesKey);
-        if (cached) {
-          searchSeqRef.current += 1; // supersede any in-flight request
-          searchActions.applyCachedResults(q, activeSources, cached);
-          return;
-        }
-      }
-
-      const seq = ++searchSeqRef.current;
-      searchActions.beginSearch(q, activeSources);
-      (async () => {
-        try {
-          const { ipcRenderer } = (window as any).require("electron");
-          const res = await ipcRenderer.invoke("search-games", rawQuery, activeSources);
-          if (seq !== searchSeqRef.current) return; // superseded by a newer search
-          const list = Array.isArray(res) ? res : [];
-          setCachedResults(q, sourcesKey, list);
-          searchActions.finishSearch(q, list);
-        } catch {
-          if (seq !== searchSeqRef.current) return;
-          searchActions.failSearch(q);
-        }
-      })();
-    },
-    [filters]
-  );
-
-  // Realtime search: fire 350ms after typing stops, or when the selected
-  // sources change. Skipped when the current query is already searched.
-  const filtersKey = sourceKeysToKey(filters);
-  useEffect(() => {
-    const q = normalizeQuery(query);
-    if (q.length < 2) return;
-    if (hasSearched && q === searchedQuery && filtersKey === searchedSources) return;
-    const timer = setTimeout(() => {
-      debounceRef.current = null;
-      runSearch(query);
-    }, 350);
-    debounceRef.current = timer;
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [query, filtersKey, hasSearched, searchedQuery, searchedSources, runSearch]);
+    const tokens = q.split(" ").filter(Boolean);
+    const matches = (activeSources.includes("officialStandalone") ? GAME_RESULTS : []).filter((game) => {
+      const haystack = normalizeQuery(`${game.title} ${game.series} ${game.description} ${game.year} ${game.version}`);
+      return tokens.every((token) => haystack.includes(token));
+    });
+    setSearchError(null);
+    searchActions.beginSearch(q, activeSources);
+    setCachedResults(q, sourcesKey, matches);
+    searchActions.finishSearch(q, matches);
+  }, [filters]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -178,59 +126,154 @@ export default function GamesPage() {
     runSearch(query, { force: true });
   };
 
-  const handleDownload = async (game: any) => {
+  const handleQueryChange = (value: string) => {
+    setSearchError(null);
+    if (!value.trim()) {
+      searchActions.clearSearch();
+      return;
+    }
+    setQuery(value);
+    runSearch(value);
+  };
+
+  const handleStandaloneAction = async (game: { id: string; title: string }, action: "install" | "play") => {
     try {
       const { ipcRenderer } = (window as any).require("electron");
-      await ipcRenderer.invoke("start-download", game);
+      const channel = action === "play" ? "play-standalone-game" : "install-standalone-game";
+      const result = await ipcRenderer.invoke(channel, game.id);
+      if (!result || result.ok !== true) {
+        throw new Error(result?.error || `Could not ${action} ${game.title}.`);
+      }
+      if (action === "install" && result.alreadyInstalled) {
+        setInstallStatus((current) => ({ ...current, [game.id]: { installed: true, phase: "installed" } }));
+        setDownloadNotice({ type: "success", text: `${game.title} is already installed and ready to play.` });
+      } else if (action === "install") {
+        setInstallStatus((current) => ({ ...current, [game.id]: { installed: false, phase: result.phase || "downloading" } }));
+        setDownloadNotice({ type: "success", text: `Downloading and installing ${game.title} from its official source.` });
+      } else {
+        setDownloadNotice({ type: "success", text: `Launching ${game.title}.` });
+      }
     } catch (err) {
-      console.error("Download failed:", err);
+      setDownloadNotice({
+        type: "error",
+        text: err instanceof Error ? err.message : `Could not ${action} ${game.title}.`,
+      });
     }
   };
 
-  const handleSourceSearch = (sourceKey: string) => {
-    // Featured Source card clicked → search that source for popular games.
-    // Use a broad query so the provider returns its top/featured titles.
-    const sourceQuery = "games";
-    searchActions.setFilters({ archive: false, fitgirl: false, steamunlocked: false, [sourceKey]: true });
-    searchActions.setQuery(sourceQuery);
-    runSearch(sourceQuery, { sources: [sourceKey] });
+  const handleSourceSearch = () => {
+    searchActions.setFilters({ officialStandalone: true });
+    searchActions.setQuery("");
+    runSearch("", { sources: ["officialStandalone"], force: true });
   };
 
   const handleSuggestionSearch = (game: FeaturedGame) => {
-    // Curated suggestion card clicked → instant SteamUnlocked-only search.
-    searchActions.setFilters({ archive: false, fitgirl: false, steamunlocked: true });
-    searchActions.setQuery(game.searchQuery);
-    runSearch(game.searchQuery, { sources: ["steamunlocked"] });
+    searchActions.setFilters({ officialStandalone: true });
+    searchActions.setQuery(game.title);
+    runSearch(game.title, { sources: ["officialStandalone"] });
   };
 
   const toggleSuggestionExpanded = (id: string) => {
     setExpandedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
-  // Enrich suggestion cards with official Steam metadata (descriptions and
-  // header art). Runs once on mount; failures keep the catalog fallbacks.
   useEffect(() => {
     let alive = true;
-    if (FEATURED_GAMES.length === 0) return () => { alive = false; };
+    let ipcRenderer: any;
+    let statusRequestId = 0;
+    let gameStateRevision = 0;
+    const gameRevisions = new Map<string, number>();
     try {
-      const { ipcRenderer } = (window as any).require("electron");
-      const entries = FEATURED_GAMES.map((g) => ({
-        id: g.id,
-        title: g.title,
-        steamQuery: g.steamQuery,
-        steamYear: g.steamYear,
-      }));
-      ipcRenderer
-        .invoke("get-featured-games-meta", entries)
-        .then((meta: Record<string, FeaturedMeta>) => {
-          if (alive && meta && typeof meta === "object") setFeaturedMeta(meta);
-        })
-        .catch(() => {});
-    } catch {
-      // No Electron bridge (web dev mode): catalog fallbacks are used.
+      ipcRenderer = (window as any).require("electron").ipcRenderer;
+    } catch (error) {
+      setInstallStatusLoading(false);
+      setDownloadNotice({
+        type: "error",
+        text: error instanceof Error ? error.message : "Standalone game status is unavailable outside the desktop app.",
+      });
+      return () => { alive = false; };
     }
+
+    const refreshStatus = async () => {
+      const requestId = ++statusRequestId;
+      const revisionsAtStart = new Map(gameRevisions);
+      setInstallStatusLoading(true);
+      try {
+        const response: { games?: Record<string, InstallStatus>; error?: string } =
+          await ipcRenderer.invoke("get-standalone-game-status", FEATURED_GAMES.map((game) => game.id));
+        if (!alive || requestId !== statusRequestId) return;
+        if (!response || response.error || !response.games) {
+          throw new Error(response?.error || "Standalone game status could not be read.");
+        }
+        setInstallStatus((current) => {
+          const next = { ...response.games };
+          for (const [gameId, revision] of gameRevisions) {
+            if (revision !== revisionsAtStart.get(gameId) && current[gameId]) {
+              next[gameId] = current[gameId];
+            }
+          }
+          return next;
+        });
+      } catch (error) {
+        if (alive && requestId === statusRequestId) {
+          setInstallStatusLoading(false);
+          setDownloadNotice({
+            type: "error",
+            text: error instanceof Error ? error.message : "Standalone game status could not be read.",
+          });
+        }
+      } finally {
+        if (alive && requestId === statusRequestId) setInstallStatusLoading(false);
+      }
+    };
+
+    const handleGameState = (_event: unknown, state: { gameId?: string; phase?: string; error?: string }) => {
+      if (!state?.gameId || !state.phase) return;
+      gameRevisions.set(state.gameId, ++gameStateRevision);
+      setInstallStatus((current) => ({
+        ...current,
+        [state.gameId as string]: {
+          installed: state.phase === "installed",
+          phase: state.phase || null,
+          error: state.error,
+        },
+      }));
+      if (state.phase === "error" && state.error) {
+        setDownloadNotice({ type: "error", text: state.error });
+      }
+    };
+    const handleDownloadProgress = (_event: unknown, items: Array<{
+      status?: string;
+      error?: string;
+      meta?: { standaloneGameId?: string };
+    }>) => {
+      if (!Array.isArray(items)) return;
+      for (const item of items) {
+        const gameId = item.meta?.standaloneGameId;
+        if (!gameId) continue;
+        gameRevisions.set(gameId, ++gameStateRevision);
+        const phase = item.status === "completed" ? "installing"
+          : item.status === "error" || item.status === "cancelled" ? "error"
+            : item.status || "downloading";
+        setInstallStatus((current) => ({
+          ...current,
+          [gameId]: { installed: false, phase, error: item.error },
+        }));
+        if (phase === "error" && item.error) {
+          setDownloadNotice({ type: "error", text: item.error });
+        }
+      }
+    };
+
+    ipcRenderer.on("standalone-game-state", handleGameState);
+    ipcRenderer.on("downloads-progress", handleDownloadProgress);
+    refreshStatus();
+    window.addEventListener("focus", refreshStatus);
     return () => {
       alive = false;
+      ipcRenderer.removeListener("standalone-game-state", handleGameState);
+      ipcRenderer.removeListener("downloads-progress", handleDownloadProgress);
+      window.removeEventListener("focus", refreshStatus);
     };
   }, []);
 
@@ -267,30 +310,11 @@ export default function GamesPage() {
     return { counts, uniqueYears, unknownCount, ranges: { "2024+": count2024Plus, "2020-2023": count2020To2023, "2015-2019": count2015To2019, "2010-2014": count2010To2014, "2000-2009": count2000To2009, "pre-2000": countPre2000 } };
   }, [baseResults]);
 
-  const sizeStats = useMemo(() => {
-    let unknown = 0, lt1 = 0, r1to5 = 0, r5to15 = 0, r15to30 = 0, gt30 = 0;
-    baseResults.forEach((game) => {
-      const bytes = parseSizeBytes(game.size);
-      if (bytes <= 0) unknown++;
-      else if (bytes < 1024 * 1024 * 1024) lt1++;
-      else if (bytes < 5 * 1024 * 1024 * 1024) r1to5++;
-      else if (bytes < 15 * 1024 * 1024 * 1024) r5to15++;
-      else if (bytes < 30 * 1024 * 1024 * 1024) r15to30++;
-      else gt30++;
-    });
-    return { unknown, lt1, r1to5, r5to15, r15to30, gt30 };
-  }, [baseResults]);
-
   const sourceStats = useMemo(() => {
-    let archive = 0, fitgirl = 0, steamunlocked = 0, other = 0;
-    baseResults.forEach((game) => {
-      const src = (game.source || "").toLowerCase();
-      if (src.includes("archive")) archive++;
-      else if (src.includes("fitgirl")) fitgirl++;
-      else if (src.includes("steam")) steamunlocked++;
-      else other++;
-    });
-    return { archive, fitgirl, steamunlocked, other };
+    const officialStandalone = baseResults.filter((game) =>
+      (game.source || "").toLowerCase().includes("official standalone")
+    ).length;
+    return { officialStandalone };
   }, [baseResults]);
 
   const filteredResults = useMemo(() => {
@@ -308,38 +332,21 @@ export default function GamesPage() {
         return yr === Number(selectedYear);
       });
     }
-    if (sizeFilter !== "all") {
-      list = list.filter((game) => {
-        const bytes = parseSizeBytes(game.size);
-        if (sizeFilter === "unknown") return bytes <= 0;
-        if (sizeFilter === "lt-1gb") return bytes > 0 && bytes < 1024 * 1024 * 1024;
-        if (sizeFilter === "1-5gb") return bytes >= 1024 * 1024 * 1024 && bytes < 5 * 1024 * 1024 * 1024;
-        if (sizeFilter === "5-15gb") return bytes >= 5 * 1024 * 1024 * 1024 && bytes < 15 * 1024 * 1024 * 1024;
-        if (sizeFilter === "15-30gb") return bytes >= 15 * 1024 * 1024 * 1024 && bytes < 30 * 1024 * 1024 * 1024;
-        if (sizeFilter === "gt-30gb") return bytes >= 30 * 1024 * 1024 * 1024;
-        return true;
-      });
-    }
     if (sourceFilter !== "all") {
       list = list.filter((game) => {
         const src = (game.source || "").toLowerCase();
-        if (sourceFilter === "archive") return src.includes("archive");
-        if (sourceFilter === "fitgirl") return src.includes("fitgirl");
-        if (sourceFilter === "steamunlocked") return src.includes("steam");
-        if (sourceFilter === "other") return !src.includes("archive") && !src.includes("fitgirl") && !src.includes("steam");
+        if (sourceFilter === "officialStandalone") return src.includes("official standalone");
         return true;
       });
     }
     return list;
-  }, [baseResults, selectedYear, sizeFilter, sourceFilter]);
+  }, [baseResults, selectedYear, sourceFilter]);
 
   const displayResults = useMemo(() => {
     if (sortBy === "relevance") return filteredResults;
     const copy = [...filteredResults];
     if (sortBy === "year-desc") copy.sort((a, b) => (extractYearNumber(b.year) || 0) - (extractYearNumber(a.year) || 0));
     else if (sortBy === "year-asc") copy.sort((a, b) => (extractYearNumber(a.year) || 9999) - (extractYearNumber(b.year) || 9999));
-    else if (sortBy === "size-desc") copy.sort((a, b) => parseSizeBytes(b.size) - parseSizeBytes(a.size));
-    else if (sortBy === "size-asc") copy.sort((a, b) => (parseSizeBytes(a.size) || Infinity) - (parseSizeBytes(b.size) || Infinity));
     else if (sortBy === "title-asc") copy.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
     return copy;
   }, [filteredResults, sortBy]);
@@ -361,14 +368,6 @@ export default function GamesPage() {
                 </button>
               </span>
             )}
-            {sizeFilter !== "all" && (
-              <span className={searchStyles.activeFilterBadge}>
-                Size: {sizeFilter}
-                <button className={searchStyles.clearBtn} onClick={() => setSizeFilter("all")} title="Clear Size Filter">
-                  <X className="w-2.5 h-2.5" />
-                </button>
-              </span>
-            )}
             {sourceFilter !== "all" && (
               <span className={searchStyles.activeFilterBadge}>
                 Source: {sourceFilter}
@@ -385,10 +384,9 @@ export default function GamesPage() {
               </label>
               <select id="source-select" className={searchStyles.selectDropdown} value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
                 <option value="all">All Sources ({baseResults.length})</option>
-                {sourceStats.archive > 0 && <option value="archive">Archive.org ({sourceStats.archive})</option>}
-                {sourceStats.fitgirl > 0 && <option value="fitgirl">FitGirl ({sourceStats.fitgirl})</option>}
-                {sourceStats.steamunlocked > 0 && <option value="steamunlocked">SteamUnlocked ({sourceStats.steamunlocked})</option>}
-                {sourceStats.other > 0 && <option value="other">Other ({sourceStats.other})</option>}
+                {sourceStats.officialStandalone > 0 && (
+                  <option value="officialStandalone">Official standalone ({sourceStats.officialStandalone})</option>
+                )}
               </select>
             </div>
             <div className={searchStyles.controlGroup}>
@@ -414,20 +412,6 @@ export default function GamesPage() {
               </select>
             </div>
             <div className={searchStyles.controlGroup}>
-              <label htmlFor="size-select" className={searchStyles.controlLabel}>
-                <HardDrive className="w-3.5 h-3.5" style={{ color: "#06b6d4" }} /> Size:
-              </label>
-              <select id="size-select" className={searchStyles.selectDropdown} value={sizeFilter} onChange={(e) => setSizeFilter(e.target.value)}>
-                <option value="all">All Sizes ({baseResults.length})</option>
-                {sizeStats.lt1 > 0 && <option value="lt-1gb">Under 1 GB ({sizeStats.lt1})</option>}
-                {sizeStats.r1to5 > 0 && <option value="1-5gb">1 – 5 GB ({sizeStats.r1to5})</option>}
-                {sizeStats.r5to15 > 0 && <option value="5-15gb">5 – 15 GB ({sizeStats.r5to15})</option>}
-                {sizeStats.r15to30 > 0 && <option value="15-30gb">15 – 30 GB ({sizeStats.r15to30})</option>}
-                {sizeStats.gt30 > 0 && <option value="gt-30gb">Over 30 GB ({sizeStats.gt30})</option>}
-                {sizeStats.unknown > 0 && <option value="unknown">Unknown Size ({sizeStats.unknown})</option>}
-              </select>
-            </div>
-            <div className={searchStyles.controlGroup}>
               <label htmlFor="sort-select" className={searchStyles.controlLabel}>
                 <ArrowUpDown className="w-3.5 h-3.5" style={{ color: "#22d3ee" }} /> Sort:
               </label>
@@ -435,8 +419,6 @@ export default function GamesPage() {
                 <option value="relevance">Most Relevant</option>
                 <option value="year-desc">Year (Newest First)</option>
                 <option value="year-asc">Year (Oldest First)</option>
-                <option value="size-desc">Size (Largest First)</option>
-                <option value="size-asc">Size (Smallest First)</option>
                 <option value="title-asc">Title (A – Z)</option>
               </select>
             </div>
@@ -460,25 +442,30 @@ export default function GamesPage() {
   };
 
   const renderSuggestionCard = (game: FeaturedGame) => {
-    const meta = featuredMeta[game.id];
-    const shortText = (meta?.shortDescription || game.description || "").trim();
-    const fullText = (meta?.detailedDescription || game.description || "").trim();
+    const fullText = game.description.trim();
+    const shortText = fullText.length > 132 ? `${fullText.slice(0, 129).trimEnd()}…` : fullText;
     const expanded = expandedIds.includes(game.id);
     const showMore = fullText.length > 0 && fullText !== shortText;
+    const status = installStatus[game.id];
+    const installed = status?.installed === true;
+    const busy = ["downloading", "queued", "interrupted", "installing"].includes(status?.phase || "");
     return (
       <article key={game.id} className={styles.suggestionCard}>
         <button
           type="button"
           className={styles.suggestionHit}
           onClick={() => handleSuggestionSearch(game)}
-          aria-label={`Search SteamUnlocked for ${game.title}`}
+          aria-label={`Search for ${game.title}`}
         >
-          <div className={styles.suggestionThumb}>
-            {meta?.headerImage ? (
-              <img src={meta.headerImage} alt="" loading="lazy" />
-            ) : (
-              <Gamepad2 className={styles.suggestionThumbIcon} aria-hidden="true" />
-            )}
+          <div className={styles.suggestionThumb} data-game-icon={game.icon}>
+            <GameArtwork
+              title={game.title}
+              imageUrl={game.thumbnail}
+              icon={game.icon}
+              imageClassName={styles.suggestionImage}
+              fallbackClassName={styles.suggestionThumbFallback}
+              iconClassName={styles.suggestionThumbIcon}
+            />
             <span className={styles.suggestionYear}>{game.year}</span>
           </div>
           <div className={styles.suggestionBody}>
@@ -488,7 +475,7 @@ export default function GamesPage() {
           </div>
         </button>
         <div className={styles.suggestionFooter}>
-          <span className={styles.suggestionSource}>SteamUnlocked</span>
+          <span className={styles.suggestionSource}>Official ZIP · {game.downloadSize}</span>
           <div className={styles.suggestionActions}>
             {showMore && (
               <button
@@ -502,11 +489,12 @@ export default function GamesPage() {
             )}
             <button
               type="button"
-              className={styles.suggestionSearch}
-              onClick={() => handleSuggestionSearch(game)}
-              aria-label={`Search full name and short name for ${game.title}`}
+              className={styles.suggestionInstallAction}
+              onClick={() => handleStandaloneAction(game, installed ? "play" : "install")}
+              disabled={installStatusLoading || busy}
+              aria-label={installed ? `Play ${game.title}` : `Download and install ${game.title}`}
             >
-              Search
+              {installStatusLoading ? "Checking…" : installed ? "Play" : busy ? "Installing…" : "Download"}
             </button>
           </div>
         </div>
@@ -516,13 +504,13 @@ export default function GamesPage() {
   };
 
   const renderSuggestions = () => (
-    <section className={styles.suggestionsSection} aria-label="Popular game suggestions">
+    <section className={styles.suggestionsSection} aria-label="All available games">
       <div className={styles.suggestionsHeader}>
         <Sparkles style={{ width: 16, height: 16, color: "#facc15" }} aria-hidden="true" />
         <div>
-          <h2 className={styles.suggestionsTitle}>Popular picks</h2>
+          <h2 className={styles.suggestionsTitle}>Browse all games</h2>
           <p className={styles.suggestionsSubtitle}>
-            {FEATURED_GAMES.length} ready-to-play classics from SteamUnlocked — click one to search instantly.
+            {FEATURED_GAMES.length} free games from official sources. Downloads are verified and added to your library after installation.
           </p>
         </div>
       </div>
@@ -539,7 +527,7 @@ export default function GamesPage() {
 
       {/* ─── Featured Sources ─── */}
       <div className={styles.section}>
-        <h2 className={styles.sectionTitle}>Featured Sources</h2>
+        <h2 className={styles.sectionTitle}>Official game source</h2>
         <div className={styles.sourcesGrid}>
           {FEATURED_SOURCES.map((src) => {
             const Icon = src.icon;
@@ -548,7 +536,7 @@ export default function GamesPage() {
                 key={src.key}
                 className={styles.sourceCard}
                 style={{ "--src-color": src.color, "--src-bg": src.bg, "--src-border": src.border } as any}
-                onClick={() => handleSourceSearch(src.key)}
+                onClick={handleSourceSearch}
               >
                 <div className={styles.sourceIcon}>
                   <Icon style={{ width: 16, height: 16, color: src.color }} />
@@ -567,35 +555,53 @@ export default function GamesPage() {
       {/* ─── Game Search ─── */}
       <div className={styles.searchWrap}>
         <SearchModule
-          title="Download Games"
-          subtitle="Search across multiple sources for free games"
-          searchPlaceholder="Search for games..."
+          title="Standalone Games"
+          subtitle="Search instantly across official portable game releases. Downloads are checksum-verified, installed, and launched here."
+          searchPlaceholder="Search standalone games..."
           filters={sourceFilters}
           filterState={filters}
           onFilterToggle={toggleFilter}
           searchQuery={query}
-          onSearchChange={setQuery}
+          onSearchChange={handleQueryChange}
           onSearch={handleSearch}
           isSearching={searching}
           hasSearched={hasSearched}
+          searchError={searchError}
           toolbar={renderToolbar()}
           suggestions={hasSearched ? undefined : renderSuggestions()}
           emptyTitle={
             baseResults.length > 0 && displayResults.length === 0
-              ? `No games match the current filters${selectedYear !== "all" ? ` (Year: ${selectedYear})` : ""}${sizeFilter !== "all" ? ` (Size: ${sizeFilter})` : ""}${sourceFilter !== "all" ? ` (Source: ${sourceFilter})` : ""}`
+              ? `No games match the current filters${selectedYear !== "all" ? ` (Year: ${selectedYear})` : ""}${sourceFilter !== "all" ? ` (Source: ${sourceFilter})` : ""}`
               : undefined
           }
           emptyText={
             baseResults.length > 0 && displayResults.length === 0
-              ? "Try selecting a different year/size/source or clear the filters."
+              ? "Try selecting a different year or source, or clear the filters."
               : undefined
           }
         >
           {displayResults.map((game, i) => (
-            <GameCard key={game.id || i} game={game} onDownload={handleDownload} />
+            <GameCard
+              key={game.id || i}
+              game={game}
+              isInstalled={installStatus[game.id]?.installed === true}
+              isChecking={installStatusLoading && !installStatus[game.id]}
+              isBusy={["downloading", "queued", "interrupted", "installing"].includes(installStatus[game.id]?.phase || "")}
+              onInstall={(target) => handleStandaloneAction(target, "install")}
+              onPlay={(target) => handleStandaloneAction(target, "play")}
+            />
           ))}
         </SearchModule>
       </div>
+      {downloadNotice && (
+        <div
+          className={downloadNotice.type === "error" ? styles.downloadNoticeError : styles.downloadNotice}
+          role={downloadNotice.type === "error" ? "alert" : "status"}
+          aria-live="polite"
+        >
+          {downloadNotice.text}
+        </div>
+      )}
     </div>
   );
 }

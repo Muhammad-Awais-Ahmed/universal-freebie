@@ -5,6 +5,7 @@ const path = require('path');
 const {
   discoverInstalledGames,
   findGameExecutable,
+  isSteamAppInstalled,
   lookupWebIcon,
   parseSteamLibraryPaths,
   readVdfValue,
@@ -28,7 +29,12 @@ async function run() {
     mkdir(path.join(steamRoot, 'steamapps', 'appmanifest_620.acf'));
     fs.writeFileSync(
       path.join(steamRoot, 'steamapps', 'appmanifest_620.acf'),
-      '"AppState" { "name" "Portal 2" "installdir" "Portal 2" }',
+      '"AppState" { "name" "Portal 2" "installdir" "Portal 2" "StateFlags" "4" }',
+    );
+    mkdir(path.join(steamLibrary, 'steamapps', 'appmanifest_620.acf'));
+    fs.writeFileSync(
+      path.join(steamLibrary, 'steamapps', 'appmanifest_620.acf'),
+      '"AppState" { "name" "Portal 2" "installdir" "Portal 2" "StateFlags" "4" }',
     );
     mkdir(path.join(steamRoot, 'steamapps', 'libraryfolders.vdf'));
     fs.writeFileSync(
@@ -91,6 +97,21 @@ async function run() {
     assert(detected.some((game) => game.name === 'Portal 2' && game.executablePath.endsWith('portal2.exe')));
     assert(detected.some((game) => game.name === 'Sample Game' && game.executablePath === epicLaunchPath));
     assert(detected.some((game) => game.name === 'GOG Sample' && game.executablePath.endsWith('GOGSample.exe')));
+    assert.strictEqual(isSteamAppInstalled(620, {
+      platform: 'win32',
+      env: environment,
+      steamRoots: [steamRoot],
+    }), true);
+    assert.strictEqual(isSteamAppInstalled(570, {
+      platform: 'win32',
+      env: environment,
+      steamRoots: [steamRoot],
+    }), false);
+    assert.strictEqual(isSteamAppInstalled('invalid', {
+      platform: 'win32',
+      env: environment,
+      steamRoots: [steamRoot],
+    }), false);
 
     assert.strictEqual(readVdfValue('"name" "Portal \\\\ 2"', 'name'), 'Portal \\ 2');
     assert.deepStrictEqual(

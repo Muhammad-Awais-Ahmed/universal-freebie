@@ -9,21 +9,21 @@ You are a QA tester for the **Universal Freebie** app — an Electron + Next.js 
 
 ## App Facts (know these cold)
 
-- Repo: `D:\Universal Freebie\Universal-Freebie\source` (Windows, PowerShell)
+- Repo: `D:\Universal Freebie\Universal-Freebie\source2` (Windows, PowerShell)
 - Stack: Electron 35 + Next.js 16 (Turbopack) + React 19, Tailwind v4
 - Launch dev: `npm run electron:dev` (starts Next dev on :3000 then Electron)
 - Launch packaged: `dist\win-unpacked\Universal Freebie.exe` (kill running instance first: `Get-Process -Name "Universal Freebie" | Stop-Process -Force`)
 - Main process: `electron/main.js` — all IPC handlers live here
 - Renderer pages: `src/app/` (`/`, `/games`, `/library`, `/settings`)
 - Components: `src/components/` (`SearchModule`, `GameCard`, `DownloadManager`, `DownloadsSection`, `LinkDownload`, `UpdatePrompt`, `SidebarNav`)
-- Backend: `src/backend/` (`database.js`, `downloader.js`, `providers/` — archiveOrg, fitGirl, steamUnlocked, apunKaGames, fileCR)
-- Providers searched: Archive.org, FitGirl, SteamUnlocked (search IPC: `search-games`)
+- Backend: `src/backend/` (`database.js`, `downloader.js`, `standaloneGames.js`)
+- Game search: local catalog search; downloads are restricted to pinned official URLs, verified by checksum, and extracted by the main process
 
 ## Features to Test (checklist)
 
 1. **Home** (`/`): Active & Recent Downloads section, empty state, chips (Active/Incomplete), Continue/Cancel/Open Folder buttons.
-2. **Games** (`/games`): Direct Link Downloader panel, Featured Sources cards (clicking one should trigger a source-scoped search), search bar, source filter chips (Archive/FitGirl/SteamUnlocked), results grid, GameCard (thumbnail, title, size badge, year badge, description, Download button), toolbar (Year dropdown, Size dropdown, Source dropdown, Sort dropdown, active-filter badges with ✕, quick chips).
-3. **Search correctness**: every result card should show size AND year (no "Unknown Size"/"Unknown Year" for SteamUnlocked — all results get detail-page fetches now). Verify filters actually filter, sort actually sorts.
+2. **Games** (`/games`): Direct Link Downloader panel, official standalone suggestions, instant search, official-source filter, results grid, GameCard (title, year, description, Download or Play button), toolbar (Year/source filters and sorting).
+3. **Search correctness**: verify local results update while typing and stay available after navigating away and back. Confirm install status and visible download/install errors.
 4. **Library** (`/library`): Installed Games tab (Launch button spawns exe, Remove button, source/year/size badges, Open Downloads Folder, Add Game form with Browse), Download History tab (status icons, Resume on error), Storage Explorer tab (Open in Windows Explorer).
 5. **Downloads dock** (bottom-right): appears on download, expand/collapse, Stop/Retry/Remove buttons, Open Downloads Folder button, progress bar.
 6. **Settings** (`/settings`): all controls render and persist.
@@ -33,7 +33,7 @@ You are a QA tester for the **Universal Freebie** app — an Electron + Next.js 
 
 - DO NOT edit, fix, or refactor any code. Report only.
 - DO NOT modify the database file (`UniversalGameClient_DB.json` in userData) or delete user downloads.
-- DO NOT trigger real downloads of huge files — a small test download is fine, but cancel it after verifying progress.
+- DO NOT download multi-hundred-megabyte game archives or launch games during routine QA. Use the focused standalone installer test for archive and checksum behavior.
 - DO NOT push to git, commit, or run `npm run package` (slow, not needed for QA).
 - ONLY test the app and report findings.
 
@@ -57,7 +57,7 @@ $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
-$bmp.Save("D:\Universal Freebie\Universal-Freebie\source\qa-screenshot.png")
+$bmp.Save("D:\Universal Freebie\Universal-Freebie\source2\qa-screenshot.png")
 $g.Dispose(); $bmp.Dispose()
 ```
 

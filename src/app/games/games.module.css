@@ -28,7 +28,7 @@
 /* ─── Featured Sources Grid ─── */
 .sourcesGrid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 12px;
 }
 
@@ -80,6 +80,24 @@
 .sourceDesc {
   font-size: 10px;
   color: #4a5a72;
+}
+
+.downloadNotice,
+.downloadNoticeError {
+  margin: 0 28px 20px;
+  padding: 12px 14px;
+  border: 1px solid rgba(34, 197, 94, 0.32);
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.08);
+  color: #bbf7d0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.downloadNoticeError {
+  border-color: rgba(248, 113, 113, 0.4);
+  background: rgba(127, 29, 29, 0.16);
+  color: #fecaca;
 }
 
 /* ─── Search wrapper ─── */
@@ -165,17 +183,28 @@
   justify-content: center;
 }
 
-.suggestionThumb img {
+.suggestionImage {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
 
+.suggestionThumbFallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #22d3ee;
+  background: radial-gradient(circle at center, rgba(34, 211, 238, 0.12), transparent 55%), #0b0e16;
+}
+
 .suggestionThumbIcon {
-  width: 32px;
-  height: 32px;
-  color: #334155;
+  width: 44px;
+  height: 44px;
+  color: #22d3ee;
+  stroke-width: 1.6;
 }
 
 .suggestionYear {
@@ -272,26 +301,32 @@
   text-decoration: underline;
 }
 
-.suggestionSearch {
+.suggestionInstallAction {
  min-height: 44px;
+ min-width: 72px;
  padding: 0 12px;
- border: 1px solid rgba(34, 211, 238, 0.35);
+ border: 1px solid rgba(34, 197, 94, 0.4);
  border-radius: 8px;
- background: rgba(34, 211, 238, 0.08);
- color: #67e8f9;
+ background: rgba(34, 197, 94, 0.1);
+ color: #bbf7d0;
  font-size: 11px;
  font-weight: 700;
  cursor: pointer;
 }
 
-.suggestionSearch:hover {
- background: rgba(34, 211, 238, 0.14);
- border-color: #22d3ee;
+.suggestionInstallAction:hover:not(:disabled) {
+ background: rgba(34, 197, 94, 0.18);
+ border-color: #22c55e;
 }
 
-.suggestionSearch:focus-visible {
- outline: 2px solid #22d3ee;
+.suggestionInstallAction:focus-visible {
+ outline: 2px solid #22c55e;
  outline-offset: 2px;
+}
+
+.suggestionInstallAction:disabled {
+ opacity: 0.65;
+ cursor: wait;
 }
 
 .suggestionFullText {
@@ -309,4 +344,5 @@
   .sourcesGrid { grid-template-columns: 1fr; }
   .downloaderWrap, .section { padding-left: 16px; padding-right: 16px; }
   .suggestionsGrid { grid-template-columns: 1fr; }
+  .downloadNotice, .downloadNoticeError { margin-left: 16px; margin-right: 16px; }
 }

@@ -87,7 +87,7 @@ export default function LinkDownload() {
         <div>
           <h3 className={styles.title}>Direct Link &amp; Stream Downloader</h3>
           <p className={styles.subtitle}>
-            Paste any direct game zip URL or video link to accelerate download through the client.
+            Paste a file link you are authorized to download or a supported video link.
           </p>
         </div>
       </div>

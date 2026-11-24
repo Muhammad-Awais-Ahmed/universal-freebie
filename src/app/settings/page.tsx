@@ -420,8 +420,8 @@ export default function SettingsPage() {
             </label>
             <p className={styles.proxyNote}>
               The AI inspects the finished download, picks the real installer, and starts it for you.
-              Games are only ever touched inside your download folder. No account or API key is
-              needed.
+              The installer can write to the location you choose; the app only manages files in your
+              download folder. No account or API key is needed.
             </p>
             <p className={styles.proxyNote}>Auto-installs the detected setup file and adds the finished game to your library when setup completes.</p>
           </div>
@@ -442,11 +442,10 @@ export default function SettingsPage() {
                   </span>
                 </label>
                 <p className={styles.proxyNote}>
-                  Detects Visual C++ Redistributable, DirectX and .NET on this machine and silently
-                  installs only the ones that are actually missing, using a bundled copy when the
-                  download ships one.
+                  Checks for bundled Visual C++, DirectX and .NET installers and runs only those
+                  that are missing. If a runtime is not bundled, the game's installer handles it.
                 </p>
-                <p className={styles.proxyNote}>Installs only the missing runtimes required for the selected game so setup stays reliable.</p>
+                <p className={styles.proxyNote}>The app does not download or install unrelated system runtimes.</p>
               </div>
 
               <div className={styles.field}>
@@ -479,8 +478,8 @@ export default function SettingsPage() {
                   </span>
                 </label>
                 <p className={styles.proxyNote}>
-                  Removes the archive and the extracted files once the installer exits. If the
-                  installer is still running, the files are kept. The installed game is never deleted.
+                  Removes the archive and extracted files only after the installed game is found in
+                  the app's managed Installed folder. Otherwise, downloaded files are kept.
                 </p>
                 <p className={styles.proxyNote}>Cleans up the download artifacts after a successful install to keep your storage tidy.</p>
               </div>

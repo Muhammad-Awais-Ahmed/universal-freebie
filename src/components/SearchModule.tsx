@@ -16,6 +16,7 @@ export default function SearchModule({
   onSearch,
   isSearching,
   hasSearched,
+  searchError,
   emptyTitle,
   emptyText,
   toolbar,
@@ -33,6 +34,7 @@ export default function SearchModule({
   onSearch: (e: React.FormEvent) => void;
   isSearching: boolean;
   hasSearched: boolean;
+  searchError?: string | null;
   emptyTitle?: string;
   emptyText?: string;
   toolbar?: React.ReactNode;
@@ -74,7 +76,7 @@ export default function SearchModule({
 
           {filters.length > 0 && (
             <div className={styles.filters}>
-              <span className={styles.filterLabel}>Indexed Sources:</span>
+              <span className={styles.filterLabel}>Source:</span>
               {filters.map((f) => (
                 <label
                   key={f.key}
@@ -90,7 +92,7 @@ export default function SearchModule({
                   />
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${
-                      filterState[f.key] ? "bg-red-500 shadow-[0_0_6px_#ef4444]" : "bg-slate-600"
+                      filterState[f.key] ? "bg-emerald-500 shadow-[0_0_6px_#22c55e]" : "bg-slate-600"
                     }`}
                   />
                   {f.label}
@@ -107,8 +109,14 @@ export default function SearchModule({
           <div className={styles.loadingState}>
             <div className={styles.spinner} />
             <p className="font-gaming text-sm tracking-wider uppercase text-blue-400">
-              Querying repackers & archives for "{searchQuery}"...
+              Searching games for "{searchQuery}"...
             </p>
+          </div>
+        )}
+
+        {searchError && (
+          <div className={styles.searchError} role="alert">
+            {searchError}
           </div>
         )}
 
@@ -129,7 +137,7 @@ export default function SearchModule({
           <div className={styles.grid}>{children}</div>
         )}
 
-        {!isSearching && hasSearched && React.Children.count(children) === 0 && (
+        {!isSearching && !searchError && hasSearched && React.Children.count(children) === 0 && (
           <div className={styles.emptyState}>
             <div className={styles.emptyIcon}>
               <Gamepad2 className="w-12 h-12 stroke-[1.5]" />

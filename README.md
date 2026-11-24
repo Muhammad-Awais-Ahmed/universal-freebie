@@ -1,22 +1,24 @@
 # Universal Freebie
 
-Universal Freebie is a Windows desktop app for discovering, downloading, and managing PC games from multiple sources in one place.
+Universal Freebie is a Windows desktop app for finding, downloading, installing, and launching games with official standalone releases.
 
-It combines a search UI, intelligent download tracking, a game library, and optional AI-assisted installation workflows into a single Electron + Next.js application.
+It combines an allowlisted standalone game catalog, a game library, and download management for user-provided links in one Electron + Next.js application.
 
 ---
 
 ## Current features
 
-- Unified search across supported game sources
-- Relevance-based result ranking with multi-page scraping for broader coverage
+- Search the curated standalone catalog instantly, with suggestions shown before searching
+- Download official portable archives directly in the app
+- Verify pinned SHA-256/SHA-512 checksums before safely extracting and registering a game
+- Launch installed games without requiring Steam or another storefront client
 - Download queue and live progress tracking for active and interrupted downloads
 - Resume / retry / continue support for partially downloaded files
 - Download history with per-item status and progress persistence
 - Manual app update checks from Settings (no forced update prompt on startup)
 - Game Library page for installed games, download history, and local storage browsing
 - Detect Games scans Steam and Epic manifests plus common GOG, Ubisoft, EA, and game folders on Windows
-- Game artwork can be searched from the Steam Store or added as an HTTPS image URL
+- Game artwork can be added as an HTTPS image URL
 - Add Game flow for manual library registration, including executable browsing
 - Optional AI automatic installation pipeline
   - identifies the real installer in a finished download
@@ -41,11 +43,13 @@ The update experience is now user-driven and explicit through the Settings page.
 
 ---
 
-## Supported sources
+## Game catalog
 
-- FitGirl
-- SteamUnlocked
-- Archive.org
+- The current curated catalog includes Teeworlds, Xonotic, SuperTuxKart, and Endless Sky.
+- Each archive URL, checksum, and approved executable name is pinned in the app's catalog.
+- Downloads come directly from the projects' official domains or release pages; third-party mirrors are not used.
+- Archives are checked before extraction, unsafe paths and special files are rejected, and only a catalog-approved executable can be registered for launch.
+- The standalone catalog does not require Steam. The separate direct-link downloader remains user-provided and independent of game search.
 
 ---
 
@@ -135,11 +139,11 @@ source/
 ├── src/
 │   ├── app/
 │   ├── backend/
+│   │   ├── standaloneGames.js
 │   │   ├── aiInstaller.js
 │   │   ├── autoInstall.js
 │   │   ├── database.js
 │   │   ├── downloader.js
-│   │   └── providers/
 │   ├── components/
 │   └── utils/
 ├── public/
@@ -154,15 +158,16 @@ source/
 
 ## How the app works
 
-### Search and ranking
+### Search and installation
 
-- Each configured source is queried for results.
-- Pages are traversed until no fresh items are found, so the app loads more of the catalog instead of stopping at page one.
-- Results are merged, deduplicated, and ranked by relevance using title matching and metadata signals.
+- Search runs locally against the curated catalog and updates on every keystroke.
+- The main process accepts game IDs only; download URLs and approved executable names are fixed in the catalog.
+- The downloader retrieves each official ZIP, checks its pinned digest, rejects unsafe ZIP entries, and extracts it into app data.
+- Successful installs are added to the Library and launched directly from the verified install folder.
 
-### Download flow
+### Direct-link download flow
 
-- Downloads are stored under the configured Downloads directory.
+- User-provided direct links are stored under the configured Downloads directory.
 - Active transfers report real-time progress.
 - Interrupted downloads can be resumed instead of restarting from zero.
 - Completed downloads can be installed manually or via the AI installer workflow.

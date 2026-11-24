@@ -63,6 +63,7 @@ class Database {
       title: downloadItem.meta.title,
       quality: downloadItem.meta.quality,
       description: downloadItem.meta.description,
+      standaloneGameId: downloadItem.meta.standaloneGameId,
     } : undefined;
     if (exists) {
       // Update existing entry (e.g. resume → completed)

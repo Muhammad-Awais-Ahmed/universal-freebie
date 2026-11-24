@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const https = require('https');
 const { spawn } = require('child_process');
 
 const NIM_ENDPOINT = process.env.NVIDIA_NIM_BASE_URL || 'https://integrate.api.nvidia.com/v1/chat/completions';
@@ -13,7 +12,7 @@ const AI_PROXY_URL = /^direct$/i.test(configuredAiUrl)
   : configuredAiUrl || 'https://universal-freebie-ai.onrender.com/api/ai/install-plan';
 // Used only in explicit local direct mode; the hosted service remains the
 // default so provider credentials stay server-side.
-const NIM_MODEL = process.env.NVIDIA_NIM_MODEL || 'google/gemma-3-12b-it';
+const NIM_MODEL = process.env.NVIDIA_NIM_MODEL || 'nvidia/nemotron-3.5-bolt-e4b';
 const MAX_FILES = 250;
 
 // Folders are split on purpose: archives are staged in `Installs`, the
@@ -150,13 +149,15 @@ function hasDotNetDesktopRuntime() {
 }
 
 function hasDirectX() {
-  const dir = path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft Visual Studio');
-  if (!fs.existsSync(dir)) return false;
-  try {
-    return fs.readdirSync(dir).some((name) => name.toLowerCase().startsWith('shared'));
-  } catch (e) {
-    return false;
-  }
+  const windowsDirectory = process.env.SystemRoot || 'C:\\Windows';
+  const runtimeFiles = ['d3dx9_43.dll', 'xinput1_3.dll', 'd3dcompiler_43.dll'];
+  const systemDirectories = [
+    path.join(windowsDirectory, 'System32'),
+    path.join(windowsDirectory, 'SysWOW64'),
+  ];
+  return systemDirectories.some((directory) =>
+    runtimeFiles.some((file) => fs.existsSync(path.join(directory, file)))
+  );
 }
 
 function detectSystemDependencies() {
@@ -200,97 +201,59 @@ function findVisualCRedistributable(isX64) {
   }
 }
 
-// Known prerequisite installers. `detect` gives the filename of the bundled
-// setup when a download ships one; otherwise the official direct link is used.
+// Only install prerequisites shipped with the game download. If a runtime is
+// not bundled, the game's own setup remains responsible for installing it.
 const DEPENDENCY_CATALOG = [
   {
     id: 'vcredist_x64',
     label: 'Visual C++ 2015-2022 Redistributable (x64)',
     systemKey: 'Visual C++ 2015-2022 Redistributable (x64)',
     bundledNames: [/^vcredist_x64/i, /^VC_redist\.x64/i, /redist.*x64/i],
-    url: 'https://aka.ms/vs/17/release/vc_redist.x64.exe',
+    args: ['/install', '/quiet', '/norestart'],
   },
   {
     id: 'vcredist_x86',
     label: 'Visual C++ 2015-2022 Redistributable (x86)',
     systemKey: 'Visual C++ 2015-2022 Redistributable (x86)',
     bundledNames: [/^vcredist_x86/i, /^VC_redist\.x86/i, /redist.*x86/i],
-    url: 'https://aka.ms/vs/17/release/vc_redist.x86.exe',
+    args: ['/install', '/quiet', '/norestart'],
   },
   {
     id: 'directx',
     label: 'DirectX End-User Runtime (June 2010)',
     systemKey: 'DirectX End-User Runtime (June 2010)',
-    bundledNames: [/^DXSETUP/i, /^directx/i],
-    url: 'https://download.microsoft.com/download/8/4/A/84A35BF1-DAFE-4AE8-82AF-AD2AE20B6B14/directx_Jun2010_redist.exe',
+    bundledNames: [/^DXSETUP/i],
+    args: ['/silent'],
   },
   {
     id: 'dotnet48',
     label: '.NET Framework 4.8',
     systemKey: '.NET Framework 4.8',
     bundledNames: [/^ndp48/i, /dotnet.*4\.8/i],
-    url: 'https://go.microsoft.com/fwlink/?linkid=2085155',
+    args: ['/q', '/norestart'],
   },
 ];
 
 /**
- * Compare the system against the catalog and return only what is missing.
- * `bundled` is the list of absolute file paths found in the staged download,
- * so a prerequisite shipped inside the archive is always preferred.
+ * Return missing prerequisites only when their installer is bundled locally.
+ * `bundled` is the list of absolute file paths found in the staged download.
  */
-function findMissingDependencies(bundled) {
-  const present = detectSystemDependencies();
-  const names = new Set(bundled.map((file) => path.basename(file)));
+function findMissingDependencies(bundled, detected = detectSystemDependencies()) {
+  const files = Array.isArray(bundled) ? bundled : [];
   const missing = [];
 
   for (const entry of DEPENDENCY_CATALOG) {
-    if (present[entry.systemKey]) continue;
-    const bundledPath = bundled.find((file) => entry.bundledNames.some((rx) => rx.test(path.basename(file))));
+    if (detected[entry.systemKey]) continue;
+    const bundledPath = files.find((file) => entry.bundledNames.some((rx) => rx.test(path.basename(file))));
+    if (!bundledPath) continue;
     missing.push({
       id: entry.id,
       label: entry.label,
-      bundledPath: bundledPath || null,
-      url: bundledPath ? null : entry.url,
+      bundledPath,
+      args: entry.args,
     });
   }
   return missing;
-}
-
-// Downloads a prerequisite to disk over plain https so it can be run silently.
-// Kept dependency-free: Node's https module plus a manual redirect follow.
-function downloadDependency(url, destination, onBytes, redirectsLeft = 5) {
-  return new Promise((resolve, reject) => {
-    if (redirectsLeft < 0) {
-      reject(new Error('Too many redirects while fetching the dependency.'));
-      return;
-    }
-    const request = https.get(url, { timeout: 60000 }, (response) => {
-      const status = response.statusCode || 0;
-      if (status >= 300 && status < 400 && response.headers.location) {
-        response.resume();
-        const nextUrl = new URL(response.headers.location, url).toString();
-        downloadDependency(nextUrl, destination, onBytes, redirectsLeft - 1).then(resolve, reject);
-        return;
-      }
-      if (status !== 200) {
-        response.resume();
-        reject(new Error(`Download failed with HTTP ${status}.`));
-        return;
-      }
-      const total = Number(response.headers['content-length']) || 0;
-      let received = 0;
-      const file = fs.createWriteStream(destination);
-      response.on('data', (chunk) => {
-        received += chunk.length;
-        if (onBytes) onBytes(total ? received / total : 0);
-      });
-      response.pipe(file);
-      file.once('error', reject);
-      file.once('finish', () => file.close(() => resolve(destination)));
-    });
-    request.once('timeout', () => request.destroy(new Error('Dependency download timed out.')));
-    request.once('error', reject);
-  });
 }
 
 function extractPlan(payload) {
@@ -375,7 +338,7 @@ async function planInstall({ filePath, gameTitle, source }) {
       model: NIM_MODEL,
       temperature: 0,
       max_tokens: 500,
-      response_format: { type: 'json_object' },
+      stream: false,
       messages: [
         {
           role: 'system',
@@ -484,13 +447,11 @@ function runInstaller(installerPath, downloadDirectory) {
 
 // Runs a downloaded prerequisite to completion, waiting for the real exit
 // code. NSIS/Inno/VC-redist style setups all honour the same switch set:
-//   NSIS  -> /S
-//   Inno  -> /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
-//   MSI   -> msiexec /i /qn /norestart
-function runDependencyInstaller(exePath) {
+// MSI packages use msiexec; EXE switches are specific to their redistributable.
+function runDependencyInstaller(exePath, installerArgs = []) {
   const extension = path.extname(exePath).toLowerCase();
   let command = exePath;
-  let args = ['/S', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'];
+  let args = installerArgs;
 
   if (extension === '.msi') {
     command = 'msiexec.exe';
@@ -528,13 +489,10 @@ function runDependencyInstaller(exePath) {
 }
 
 /**
- * Installs every prerequisite the machine is missing, then hands control back.
- * Bundled prerequisites are used when the download shipped one; otherwise the
- * official Microsoft runtime is fetched to a temp cache.
+ * Installs only missing prerequisites bundled with the selected download.
+ * Unbundled runtimes are left to the game's installer.
  */
 async function installMissingDependencies(bundledFiles, options = {}) {
-  const cacheDirectory = options.cacheDirectory
-    || path.join(require('os').tmpdir(), 'universal-freebie-deps');
   const onUpdate = typeof options.onUpdate === 'function' ? options.onUpdate : () => {};
   const results = [];
 
@@ -546,11 +504,9 @@ async function installMissingDependencies(bundledFiles, options = {}) {
   }
 
   if (!missing.length) {
-    onUpdate({ phase: 'dependencies-done', installed: [], message: 'All required runtimes are already present.' });
+    onUpdate({ phase: 'dependencies-done', installed: [], message: 'No bundled prerequisites need installing.' });
     return { ok: true, installed: [] };
   }
-
-  fs.mkdirSync(cacheDirectory, { recursive: true });
 
   for (let index = 0; index < missing.length; index += 1) {
     const dependency = missing[index];
@@ -562,31 +518,8 @@ async function installMissingDependencies(bundledFiles, options = {}) {
       total: missing.length,
     });
 
-    let target = dependency.bundledPath;
-    let temporary = false;
-
-    if (!target) {
-      const fileName = path.basename(new URL(dependency.url).pathname) || `${dependency.id}.exe`;
-      target = path.join(cacheDirectory, fileName);
-      try {
-        onUpdate({ phase: 'dependency-download', label: dependency.label, index, total: missing.length });
-        await downloadDependency(dependency.url, target, (fraction) => {
-          onUpdate({ phase: 'dependency-download', label: dependency.label, index, total: missing.length, fraction });
-        });
-        temporary = true;
-      } catch (error) {
-        results.push({ id: dependency.id, label: dependency.label, ok: false, error: error.message });
-        onUpdate({ phase: 'dependency-failed', label: dependency.label, error: error.message });
-        continue;
-      }
-    }
-
     onUpdate({ phase: 'dependency-installing', label: dependency.label, index, total: missing.length });
-    const outcome = await runDependencyInstaller(target);
-
-    if (temporary) {
-      try { fs.unlinkSync(target); } catch (e) {}
-    }
+    const outcome = await runDependencyInstaller(dependency.bundledPath, dependency.args);
 
     results.push({ id: dependency.id, label: dependency.label, ok: outcome.ok, error: outcome.error });
     onUpdate({

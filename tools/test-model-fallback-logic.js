@@ -17,6 +17,11 @@ const source = fs.readFileSync(SERVER_PATH, 'utf8');
 
 const { resolveModelRoutes, MAX_MODEL_ROUTES } = require('../ai-backend/modelRouting');
 const fallbacks = resolveModelRoutes({}).models;
+const CURRENT_MODELS = [
+  'nvidia/nemotron-3.5-bolt-e4b',
+  'google/gemma-4-31b-it',
+  'mistralai/mistral-large-4-1t-a52b',
+];
 
 const helperSource = source.slice(
   source.indexOf('async function requestNim'),
@@ -36,10 +41,8 @@ function check(label, condition) {
   }
 }
 
-// 1. The configured route list must use a supported, non-retired model ID.
-const RETIRED = 'meta/llama-3.1-8b-instruct';
-check('configured default is no longer the retired model', !source.includes(`|| '${RETIRED}'`));
-check('fallback list is not the retired model', !fallbacks.includes(RETIRED));
+// 1. The configured route list must use currently documented NVIDIA NIM IDs.
+check('current NVIDIA NIM models are the built-in routes', JSON.stringify(fallbacks) === JSON.stringify(CURRENT_MODELS));
 check('fallback list is non-empty', fallbacks.length > 0);
 check('fallback list has no duplicates', new Set(fallbacks).size === fallbacks.length);
 const comboRoutes = resolveModelRoutes({
@@ -63,9 +66,12 @@ check('starts from the configured model first', /\[preferredModel, \.\.\.MODEL_F
 // 4. Exercise the real helper with a stubbed fetch: first model 410s, second works.
 async function runChain(behaviour, models = fallbacks) {
   const requested = [];
+  const requestBodies = [];
   const sandboxFetch = async (url, options) => {
-    const model = JSON.parse(options.body).model;
+    const body = JSON.parse(options.body);
+    const model = body.model;
     requested.push(model);
+    requestBodies.push(body);
     return behaviour(model);
   };
 
@@ -89,7 +95,7 @@ async function runChain(behaviour, models = fallbacks) {
 
   console.log = realLog;
   console.error = realError;
-  return { requested, result };
+  return { requested, requestBodies, result };
 }
 
 function gemmaOk(model) {
@@ -105,9 +111,11 @@ function gemmaOk(model) {
 (async () => {
   // A custom combo model is sent first when configured, then falls back normally.
   {
-    const { requested, result } = await runChain((model) => gemmaOk(model), comboRoutes.models);
+    const { requested, requestBodies, result } = await runChain((model) => gemmaOk(model), comboRoutes.models);
     check('combo route is requested first', requested[0] === '21559-M');
     check('combo route can return success', result.ok === true && result.modelUsed === '21559-M');
+    check('NIM request disables streaming for JSON parsing', requestBodies[0].stream === false);
+    check('NIM request omits unsupported response_format', !('response_format' in requestBodies[0]));
   }
 
   // Case A: first model 410s, next one works.
@@ -127,14 +135,14 @@ function gemmaOk(model) {
 
   // Case B: several models are dead, must keep walking.
   {
-    const dead = new Set(fallbacks.slice(0, 3));
+    const dead = new Set(fallbacks.slice(0, 2));
     const { requested, result } = await runChain((model) => {
       if (dead.has(model)) return { ok: false, status: 410, text: async () => 'gone' };
       return gemmaOk(model);
     });
 
-    check('B: skipped three unavailable models', requested.length === 4);
-    check('B: succeeded on the fourth', result.ok === true);
+    check('B: skipped two unavailable models', requested.length === 3);
+    check('B: succeeded on the third', result.ok === true);
     check('B: no duplicates requested', new Set(requested).size === requested.length);
   }
 

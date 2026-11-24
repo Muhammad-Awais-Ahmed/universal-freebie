@@ -11,7 +11,7 @@
  *
  * Environment:
  *   NVIDIA_NIM_API_KEY   (required) NVIDIA NIM API key
- *   NVIDIA_NIM_MODEL     (optional) default google/gemma-3-12b-it
+ *   NVIDIA_NIM_MODEL     (optional) default nvidia/nemotron-3.5-bolt-e4b
  *   NVIDIA_NIM_FALLBACK_MODELS (optional) comma-separated model IDs, max 8 fallback routes
  *   AI_CLIENT_TOKEN      (optional) shared token the app must send. Leave unset
  *                        to keep the service open, which is the default.
@@ -109,7 +109,7 @@ async function requestNim({ gameTitle, source, files }) {
           model,
           temperature: 0,
           max_tokens: 500,
-          response_format: { type: 'json_object' },
+          stream: false,
           messages: [
             { role: 'system', content: SYSTEM_PROMPT },
             {

@@ -1,9 +1,7 @@
-const DEFAULT_MODEL = 'google/gemma-3-12b-it';
+const DEFAULT_MODEL = 'nvidia/nemotron-3.5-bolt-e4b';
 const DEFAULT_FALLBACK_MODELS = [
-  'google/gemma-3-4b-it',
-  'mistralai/mistral-7b-instruct-v0.3',
-  'nvidia/mistral-nemo-12b-instruct',
-  'ibm/granite-3.0-8b-instruct',
+  'google/gemma-4-31b-it',
+  'mistralai/mistral-large-4-1t-a52b',
 ];
 const MAX_MODEL_ROUTES = 9;
 

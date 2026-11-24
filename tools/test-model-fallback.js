@@ -36,11 +36,9 @@ const SYSTEM_PROMPT =
   'installerPath must be an existing relative .exe or .msi path, or null if none exists.';
 
 const MODEL_FALLBACKS = [
-  'google/gemma-3-12b-it',
-  'google/gemma-3-4b-it',
-  'mistralai/mistral-7b-instruct-v0.3',
-  'nvidia/mistral-nemo-12b-instruct',
-  'ibm/granite-3.0-8b-instruct',
+  'nvidia/nemotron-3.5-bolt-e4b',
+  'google/gemma-4-31b-it',
+  'mistralai/mistral-large-4-1t-a52b',
 ];
 
 const FILES = [
@@ -57,7 +55,7 @@ async function tryModel(model) {
       model,
       temperature: 0,
       max_tokens: 500,
-      response_format: { type: 'json_object' },
+      stream: false,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         {
@@ -78,7 +76,7 @@ async function tryModel(model) {
     process.exit(0);
   }
 
-  const candidates = ['meta/llama-3.1-8b-instruct', ...MODEL_FALLBACKS];
+  const candidates = MODEL_FALLBACKS;
   let passed = 0;
   let failed = 0;
   let winner = null;
